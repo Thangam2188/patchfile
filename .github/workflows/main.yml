@@ -1,4 +1,4 @@
-name: Run PowerShell Script
+name: Run PowerShell Script and Upload to S3
 
 on:
   push:
@@ -14,16 +14,23 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
-    - name: Set up PowerShell
+    - name: Set up Python
       uses: actions/setup-python@v2
       with:
         python-version: '3.x'
-    
+
     - name: Install AWS CLI
       run: |
         pip install awscli
 
+    - name: Configure AWS credentials
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws configure set default.region ${{ secrets.AWS_REGION }}
+      shell: bash
+
     - name: Run PowerShell script
       shell: pwsh
       run: |
-        ./find_and_upload_patches.ps1
+        ./find_and_upload_patches.ps1 -MachineName ${{ secrets.MACHINE_NAME }} -BucketName ${{ secrets.BUCKET_NAME }} -AWSRegion ${{ secrets.AWS_REGION }}
