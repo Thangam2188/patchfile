@@ -63,3 +63,4 @@ $jsonPatches | Set-Content -Path $fileName
 
 # Push the JSON file to GitHub
 Push-ToGitHub -token $token -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
+#final
