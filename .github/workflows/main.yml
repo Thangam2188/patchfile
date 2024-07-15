@@ -33,4 +33,4 @@ jobs:
     - name: Run PowerShell script
       shell: pwsh
       run: |
-        ./scan_patches.ps1 -BucketArn arn:aws:s3:::mybuckettest2188 -AWSRegion us-east-1
+        ./find_and_upload_patches.ps1 -BucketArn arn:aws:s3:::mybuckettest2188 -AWSRegion us-east-1
