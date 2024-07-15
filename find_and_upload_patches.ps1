@@ -12,9 +12,13 @@ function Scan-Patches {
     )
     Write-Output "Scanning for critical and important security patches on instance $InstanceId in region $AWSRegion"
 
-    $scanCommand = @"
-aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '{""Operation"":[""Scan""],""SeverityLevels"":[""Critical"",""Important""]}' --region $AWSRegion
-"@
+    $parameters = @{
+        Operation = @("Scan")
+        SeverityLevels = @("Critical", "Important")
+    }
+    $parametersJson = $parameters | ConvertTo-Json -Compress
+
+    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '$parametersJson' --region $AWSRegion"
     try {
         $result = Invoke-Expression $scanCommand
         $commandId = ($result | ConvertFrom-Json).Command.CommandId
