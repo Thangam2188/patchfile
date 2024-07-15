@@ -23,4 +23,4 @@ jobs:
           aws-region: us-east-1
 
       - name: Run PowerShell Script
-        run: PowerShell -File .\check_security_patches.ps1
+        run: PowerShell -File .\find_and_upload_patches.ps1
