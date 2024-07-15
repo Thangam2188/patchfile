@@ -1,7 +1,8 @@
 param (
     [string]$InstanceId = "i-01a7d5d948f6b49c9",
     [string]$BucketArn = "arn:aws:s3:::mybuckettest2188",
-    [string]$AWSRegion = "us-east-1"
+    [string]$AWSRegion = "us-east-1",
+    [string]$GitHubToken = "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"
 )
 
 # Function to get patch information for the instance
@@ -44,7 +45,7 @@ function Upload-ToS3 {
 # Function to push file to GitHub
 function Push-ToGitHub {
     param (
-        [string]$token,
+        [string]$GitHubToken,
         [string]$repo,
         [string]$branch,
         [string]$filePath,
@@ -63,7 +64,7 @@ function Push-ToGitHub {
     } | ConvertTo-Json
 
     $headers = @{
-        Authorization = "Bearer $token"
+        Authorization = "Bearer $GitHubToken"
         Accept = "application/vnd.github.v3+json"
         "User-Agent" = "PowerShell"
         "Content-Type" = "application/json"
@@ -80,13 +81,6 @@ function Push-ToGitHub {
 
 # Main script execution
 try {
-    # Check if GITHUB_TOKEN environment variable is set
-    $token = $env:GITHUB_TOKEN
-    if (-not $token) {
-        Write-Error "GitHub token not set. Please set the GITHUB_TOKEN environment variable."
-        exit 1
-    }
-
     # Retrieve patch information
     $patchInfo = Get-PatchInfo -InstanceId $InstanceId -AWSRegion $AWSRegion
 
@@ -101,7 +95,7 @@ try {
     $repo = "your-username/your-repo-name"
     $branch = "main"
     $commitMessage = "Add patch info output JSON file"
-    Push-ToGitHub -token $token -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
+    Push-ToGitHub -GitHubToken $GitHubToken -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
 } catch {
     Write-Error "An error occurred during script execution: $_"
     exit 1
