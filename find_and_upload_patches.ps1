@@ -18,6 +18,7 @@ aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBas
     try {
         $result = Invoke-Expression $scanCommand
         $commandId = ($result | ConvertFrom-Json).Command.CommandId
+        Write-Output "Command ID: $commandId"
         return $commandId
     } catch {
         Write-Error "Failed to send SSM command: $_"
