@@ -4,66 +4,21 @@ param (
     [string]$AWSRegion = "us-east-1"
 )
 
-# Function to scan for critical and important patches
-function Scan-Patches {
+# Function to get patch states for the instance
+function Get-PatchState {
     param (
         [string]$InstanceId,
         [string]$AWSRegion
     )
-    Write-Output "Scanning for critical and important security patches on instance $InstanceId in region $AWSRegion"
+    Write-Output "Retrieving patch states for instance $InstanceId in region $AWSRegion"
 
-    $parameters = @{
-        Operation = @("Scan")
-        SeverityLevels = @("Critical", "Important")
-    }
-    $parametersJson = $parameters | ConvertTo-Json -Compress
-
-    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '$parametersJson' --region $AWSRegion"
+    $patchStateCommand = "aws ssm describe-instance-patch-states --instance-ids $InstanceId --region $AWSRegion"
     try {
-        $result = Invoke-Expression $scanCommand
-        $commandId = ($result | ConvertFrom-Json).Command.CommandId
-        Write-Output "Command ID: $commandId"
-        return $commandId
+        $result = Invoke-Expression $patchStateCommand
+        $patchState = ($result | ConvertFrom-Json).InstancePatchStates[0]
+        return $patchState
     } catch {
-        Write-Error "Failed to send SSM command: $_"
-        exit 1
-    }
-}
-
-# Function to retrieve SSM command output
-function Get-SSMCommandOutput {
-    param (
-        [string]$CommandId,
-        [string]$InstanceId,
-        [string]$AWSRegion
-    )
-    Write-Output "Retrieving output for SSM command ID $CommandId on instance $InstanceId"
-
-    try {
-        while ($true) {
-            $statusCommand = "aws ssm list-command-invocations --command-id $CommandId --details --region $AWSRegion"
-            $statusResult = Invoke-Expression $statusCommand
-            $invocations = ($statusResult | ConvertFrom-Json).CommandInvocations
-
-            if ($null -eq $invocations -or $invocations.Count -eq 0) {
-                Write-Error "No command invocations found for command ID $CommandId"
-                exit 1
-            }
-
-            $invocation = $invocations[0]
-
-            if ($invocation.Status -eq "InProgress" -or $invocation.Status -eq "Pending") {
-                Start-Sleep -Seconds 10
-            } elseif ($invocation.Status -eq "Success") {
-                $output = $invocation.CommandPlugins[0].Output
-                return $output
-            } else {
-                Write-Error "SSM command failed with status $($invocation.Status)"
-                exit 1
-            }
-        }
-    } catch {
-        Write-Error "Failed to retrieve SSM command output: $_"
+        Write-Error "Failed to retrieve patch state: $_"
         exit 1
     }
 }
@@ -125,15 +80,12 @@ function Push-ToGitHub {
 
 # Main script execution
 try {
-    # Scan for patches
-    $commandId = Scan-Patches -InstanceId $InstanceId -AWSRegion $AWSRegion
-
-    # Retrieve SSM command output
-    $ssmOutput = Get-SSMCommandOutput -CommandId $commandId -InstanceId $InstanceId -AWSRegion $AWSRegion
+    # Retrieve patch state
+    $patchState = Get-PatchState -InstanceId $InstanceId -AWSRegion $AWSRegion
 
     # Save the output to a file
-    $fileName = "${InstanceId}_patch_scan_output.json"
-    $ssmOutput | Set-Content -Path $fileName
+    $fileName = "${InstanceId}_patch_state_output.json"
+    $patchState | ConvertTo-Json -Compress | Set-Content -Path $fileName
 
     # Upload JSON file to S3
     Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
@@ -146,7 +98,7 @@ try {
     }
     $repo = "your-username/your-repo-name"
     $branch = "main"
-    $commitMessage = "Add patch scan output JSON file"
+    $commitMessage = "Add patch state output JSON file"
     Push-ToGitHub -token $token -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
 } catch {
     Write-Error "An error occurred during script execution: $_"
