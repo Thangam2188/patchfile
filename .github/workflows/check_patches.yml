@@ -1,10 +1,9 @@
-
 name: Check Security Patches
 
 on:
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # Runs every Monday at midnight UTC
 
 jobs:
   check_patches:
@@ -34,15 +33,4 @@ jobs:
       - name: Fetch Patch List from S3
         run: |
           aws s3 cp s3://mybuckettest2188/i-01a7d5d948f6b49c9/security_patches.txt ./security_patches.txt
-
-      - name: Create a PR with the Patch List
-        run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          git checkout -b patch-list-update
-          echo "## Security Patches" > PATCH_LIST.md
-          cat security_patches.txt >> PATCH_LIST.md
-          git add PATCH_LIST.md
-          git commit -m "Update security patch list"
-          git push origin patch-list-update
-          gh pr create --title "Security Patch List Update" --body "This PR contains the latest security patch list." --base main --head patch-list-update
+          cat ./security_patches.txt
