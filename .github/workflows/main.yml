@@ -1,35 +1,26 @@
-name: Run PowerShell Script and Upload to S3
+name: Run Security Patch Check
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # Runs every Monday at midnight UTC
 
 jobs:
-  build:
+  check_patches:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.x'
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-cli@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
 
-    - name: Install AWS CLI
-      run: |
-        pip install awscli
-
-    - name: Configure AWS credentials
-      run: |
-        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws configure set default.region us-east-1
-      shell: bash
-
-    - name: Run PowerShell script
-      shell: pwsh
-      run: ./find_and_upload_patches.ps1 -BucketArn arn:aws:s3:::mybuckettest2188 -AWSRegion us-east-1
+      - name: Run PowerShell Script
+        run: PowerShell -File .\check_security_patches.ps1
