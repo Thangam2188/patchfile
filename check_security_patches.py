@@ -27,7 +27,7 @@ $securityUpdates = $updates | Where-Object {
     ($_.IsSecurityUpdate -eq $true) -and
     ($_.MsrcSeverity -eq 'Critical' -or $_.MsrcSeverity -eq 'Important')
 }
-
+##
 # Output the list of important and critical security updates to a file
 $securityUpdates | ForEach-Object {
     "$($_.Title) - $($_.MsrcSeverity)" 
