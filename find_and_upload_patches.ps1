@@ -49,7 +49,7 @@ $jsonOutput | Set-Content -Path $fileName
 Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
 
 # Define GitHub parameters
-$token = $env:GITHUB_TOKEN  # Set this as a GitHub Secret in your repository
+$token = $env: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  # Set this as a GitHub Secret in your repository
 $repo = "your-username/your-repo-name"
 $branch = "main"
 $commitMessage = "Add patch scan output JSON file"
