@@ -15,9 +15,41 @@ function Scan-Patches {
     $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '{`"Operation`":[`"Scan`"],`"SeverityLevels`":[`"Critical`",`"Important`"]}' --region $AWSRegion"
     try {
         $result = Invoke-Expression $scanCommand
-        return $result
+        $commandId = ($result | ConvertFrom-Json).Command.CommandId
+        return $commandId
     } catch {
         Write-Error "Failed to send SSM command: $_"
+        exit 1
+    }
+}
+
+# Function to retrieve SSM command output
+function Get-SSMCommandOutput {
+    param (
+        [string]$CommandId,
+        [string]$InstanceId,
+        [string]$AWSRegion
+    )
+    Write-Output "Retrieving output for SSM command ID $CommandId on instance $InstanceId"
+
+    try {
+        while ($true) {
+            $statusCommand = "aws ssm list-command-invocations --command-id $CommandId --details --region $AWSRegion"
+            $statusResult = Invoke-Expression $statusCommand
+            $invocation = ($statusResult | ConvertFrom-Json).CommandInvocations[0]
+
+            if ($invocation.Status -eq "InProgress" -or $invocation.Status -eq "Pending") {
+                Start-Sleep -Seconds 10
+            } elseif ($invocation.Status -eq "Success") {
+                $output = $invocation.CommandPlugins[0].Output
+                return $output
+            } else {
+                Write-Error "SSM command failed with status $($invocation.Status)"
+                exit 1
+            }
+        }
+    } catch {
+        Write-Error "Failed to retrieve SSM command output: $_"
         exit 1
     }
 }
@@ -79,30 +111,14 @@ function Push-ToGitHub {
 # Main script execution
 try {
     # Scan for patches
-    $scanResult = Scan-Patches -InstanceId $InstanceId -AWSRegion $AWSRegion
+    $commandId = Scan-Patches -InstanceId $InstanceId -AWSRegion $AWSRegion
 
-    # Assume the output will be stored in a file named after the instance
+    # Retrieve SSM command output
+    $ssmOutput = Get-SSMCommandOutput -CommandId $commandId -InstanceId $InstanceId -AWSRegion $AWSRegion
+
+    # Save the output to a file
     $fileName = "${InstanceId}_patch_scan_output.json"
-
-    # Simulate saving scan output to a file (for demonstration purposes)
-    # In reality, you might need to retrieve the actual output from SSM
-    $jsonOutput = @"
-{
-    "InstanceId": "$InstanceId",
-    "ScanTime": "$(Get-Date)",
-    "Patches": [
-        {
-            "Title": "Example Patch 1",
-            "Severity": "Critical"
-        },
-        {
-            "Title": "Example Patch 2",
-            "Severity": "Important"
-        }
-    ]
-}
-"@
-    $jsonOutput | Set-Content -Path $fileName
+    $ssmOutput | Set-Content -Path $fileName
 
     # Upload JSON file to S3
     Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
