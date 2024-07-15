@@ -25,7 +25,8 @@ function Upload-ToS3 {
     )
     Write-Output "Uploading $FilePath to S3 bucket $BucketArn"
     $bucketName = $BucketArn -replace "arn:aws:s3:::",""
-    aws s3 cp $FilePath s3://$bucketName/ --region $AWSRegion
+    $s3Command = "aws s3 cp $FilePath s3://$bucketName/ --region $AWSRegion"
+    Invoke-Expression $s3Command
 }
 
 # Scan for patches
@@ -49,7 +50,7 @@ $jsonOutput | Set-Content -Path $fileName
 Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
 
 # Define GitHub parameters
-$token = $env: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  # Set this as a GitHub Secret in your repository
+$token = $env:GITHUB_TOKEN  # Ensure this is set as a GitHub Secret in your repository
 $repo = "your-username/your-repo-name"
 $branch = "main"
 $commitMessage = "Add patch scan output JSON file"
@@ -76,7 +77,7 @@ function Push-ToGitHub {
     } | ConvertTo-Json
 
     $headers = @{
-        Authorization = "token $token"
+        Authorization = "Bearer $token"
         Accept = "application/vnd.github.v3+json"
         "User-Agent" = "PowerShell"
         "Content-Type" = "application/json"
