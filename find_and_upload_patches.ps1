@@ -12,7 +12,9 @@ function Scan-Patches {
     )
     Write-Output "Scanning for critical and important security patches on instance $InstanceId in region $AWSRegion"
 
-    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '{`"Operation`":[`"Scan`"],`"SeverityLevels`":[`"Critical`",`"Important`"]}' --region $AWSRegion"
+    $scanCommand = @"
+aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '{""Operation"":[""Scan""],""SeverityLevels"":[""Critical"",""Important""]}' --region $AWSRegion
+"@
     try {
         $result = Invoke-Expression $scanCommand
         $commandId = ($result | ConvertFrom-Json).Command.CommandId
@@ -36,7 +38,14 @@ function Get-SSMCommandOutput {
         while ($true) {
             $statusCommand = "aws ssm list-command-invocations --command-id $CommandId --details --region $AWSRegion"
             $statusResult = Invoke-Expression $statusCommand
-            $invocation = ($statusResult | ConvertFrom-Json).CommandInvocations[0]
+            $invocations = ($statusResult | ConvertFrom-Json).CommandInvocations
+
+            if ($null -eq $invocations -or $invocations.Count -eq 0) {
+                Write-Error "No command invocations found for command ID $CommandId"
+                exit 1
+            }
+
+            $invocation = $invocations[0]
 
             if ($invocation.Status -eq "InProgress" -or $invocation.Status -eq "Pending") {
                 Start-Sleep -Seconds 10
