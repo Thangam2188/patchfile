@@ -93,9 +93,7 @@ try {
     # Upload JSON file to S3
     Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
 
-    # Push the JSON file to GitHub
-    $commitMessage = "Add patch info output JSON file"
-    Push-ToGitHub -GitHubToken $GitHubToken -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
+   
 } catch {
     Write-Error "An error occurred during script execution: $_"
     exit 1
