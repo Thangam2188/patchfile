@@ -1,7 +1,7 @@
 param (
     [string]$InstanceId = "i-01a7d5d948f6b49c9",
-    [string]$BucketName,
-    [string]$AWSRegion
+    [string]$BucketArn = "arn:aws:s3:::mybuckettest2188",
+    [string]$AWSRegion = "us-east-1"
 )
 
 # Function to scan for patches
@@ -19,12 +19,13 @@ function Scan-Patches {
 # Function to upload file to S3
 function Upload-ToS3 {
     param (
-        [string]$BucketName,
+        [string]$BucketArn,
         [string]$FilePath,
         [string]$AWSRegion
     )
-    Write-Output "Uploading $FilePath to S3 bucket $BucketName"
-    aws s3 cp $FilePath s3://$BucketName/ --region $AWSRegion
+    Write-Output "Uploading $FilePath to S3 bucket $BucketArn"
+    $bucketName = $BucketArn -replace "arn:aws:s3:::",""
+    aws s3 cp $FilePath s3://$bucketName/ --region $AWSRegion
 }
 
 # Scan for patches
@@ -45,7 +46,7 @@ $jsonOutput = @"
 $jsonOutput | Set-Content -Path $fileName
 
 # Upload JSON file to S3
-Upload-ToS3 -BucketName $BucketName -FilePath $fileName -AWSRegion $AWSRegion
+Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
 
 # Define GitHub parameters
 $token = $env:GITHUB_TOKEN  # Set this as a GitHub Secret in your repository
