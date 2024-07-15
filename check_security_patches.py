@@ -2,7 +2,7 @@
 
 # Define variables
 $instanceId = "i-01a7d5d948f6b49c9"
-$bucketArn = "arn:aws:s3:::mybuckettest2188"
+$bucketName = "mybuckettest2188"
 $region = "us-east-1"
 $patchFile = "C:\temp\security_patches.txt"
 
@@ -34,6 +34,6 @@ $securityUpdates | ForEach-Object {
 } | Out-File -FilePath $patchFile
 
 # Upload the file to S3
-aws s3 cp $patchFile "s3://mybuckettest2188/$instanceId/security_patches.txt" --region $region
+aws s3 cp $patchFile "s3://$bucketName/$instanceId/security_patches.txt" --region $region
 
 Write-Host "Security patches have been listed and uploaded to S3."
