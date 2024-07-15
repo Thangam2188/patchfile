@@ -115,9 +115,10 @@ function Push-ToGitHub {
     }
 
     try {
-        Invoke-RestMethod -Uri $uri -Method PUT -Headers $headers -Body $body
+        $response = Invoke-RestMethod -Uri $uri -Method PUT -Headers $headers -Body $body
+        Write-Output "File pushed to GitHub successfully."
     } catch {
-        Write-Error "Failed to push to GitHub: $_"
+        Write-Error "Failed to push to GitHub: $_. Response: $($response | ConvertTo-Json -Compress)"
         exit 1
     }
 }
