@@ -12,7 +12,7 @@ function Scan-Patches {
     )
     Write-Output "Scanning for critical and important security patches on instance $InstanceId in region $AWSRegion"
 
-    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '{""Operation"":[""Scan""],""SeverityLevels"":[""Critical"",""Important""]}' --region $AWSRegion"
+    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '{`"Operation`":[`"Scan`"],`"SeverityLevels`":[`"Critical`",`"Important`"]}' --region $AWSRegion"
     try {
         $result = Invoke-Expression $scanCommand
         return $result
@@ -109,6 +109,10 @@ try {
 
     # Push the JSON file to GitHub
     $token = $env:GITHUB_TOKEN  # Ensure this is set as a GitHub Secret in your repository
+    if (-not $token) {
+        Write-Error "GitHub token not set. Please set the GITHUB_TOKEN environment variable."
+        exit 1
+    }
     $repo = "your-username/your-repo-name"
     $branch = "main"
     $commitMessage = "Add patch scan output JSON file"
