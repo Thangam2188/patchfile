@@ -21,7 +21,7 @@ function Get-AvailableUpdates {
 
 # Get available updates
 $updates = Get-AvailableUpdates
-
+#check
 # Filter security updates that are important or critical
 $securityUpdates = $updates | Where-Object {
     ($_.IsSecurityUpdate -eq $true) -and
