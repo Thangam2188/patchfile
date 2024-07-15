@@ -79,6 +79,7 @@ function Push-ToGitHub {
         Authorization = "token $token"
         Accept = "application/vnd.github.v3+json"
         "User-Agent" = "PowerShell"
+        "Content-Type" = "application/json"
     }
 
     Invoke-RestMethod -Uri $uri -Method PUT -Headers $headers -Body $body
