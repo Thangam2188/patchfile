@@ -80,6 +80,13 @@ function Push-ToGitHub {
 
 # Main script execution
 try {
+    # Check if GITHUB_TOKEN environment variable is set
+    $token = $env:GITHUB_TOKEN
+    if (-not $token) {
+        Write-Error "GitHub token not set. Please set the GITHUB_TOKEN environment variable."
+        exit 1
+    }
+
     # Retrieve patch state
     $patchState = Get-PatchState -InstanceId $InstanceId -AWSRegion $AWSRegion
 
@@ -91,11 +98,6 @@ try {
     Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
 
     # Push the JSON file to GitHub
-    $token = $env:GITHUB_TOKEN  # Ensure this is set as a GitHub Secret in your repository
-    if (-not $token) {
-        Write-Error "GitHub token not set. Please set the GITHUB_TOKEN environment variable."
-        exit 1
-    }
     $repo = "your-username/your-repo-name"
     $branch = "main"
     $commitMessage = "Add patch state output JSON file"
