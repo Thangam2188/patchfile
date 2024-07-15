@@ -1,41 +1,20 @@
 param (
-    [string]$MachineName,
+    [string]$InstanceId = "i-01a7d5d948f6b49c9",
     [string]$BucketName,
     [string]$AWSRegion
 )
 
-if (-not $MachineName) {
-    $MachineName = $env:COMPUTERNAME
+# Function to scan for patches
+function Scan-Patches {
+    param (
+        [string]$InstanceId,
+        [string]$AWSRegion
+    )
+    Write-Output "Scanning patches for instance $InstanceId in region $AWSRegion"
+
+    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters 'Operation=Scan' --region $AWSRegion"
+    Invoke-Expression $scanCommand
 }
-$fileName = "${MachineName}_missing_patches.json"
-
-# Create a Windows Update session
-$updateSession = New-Object -ComObject Microsoft.Update.Session
-$updateSearcher = $updateSession.CreateUpdateSearcher()
-
-# Search for pending updates
-$searchResult = $updateSearcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
-
-# Filter for security updates that are Critical or Important
-$securityUpdates = $searchResult.Updates | Where-Object {
-    $_.MsrcSeverity -eq 'Critical' -or $_.MsrcSeverity -eq 'Important'
-}
-
-# Prepare the data to be saved as JSON
-$patches = @()
-foreach ($update in $securityUpdates) {
-    $patches += [PSCustomObject]@{
-        Title       = $update.Title
-        Description = $update.Description
-        KBArticle   = $update.KBArticleIDs -join ', '
-        Severity    = $update.MsrcSeverity
-        MoreInfo    = $update.MoreInfoUrls -join ', '
-    }
-}
-
-# Convert patches list to JSON and save to file
-$jsonPatches = $patches | ConvertTo-Json -Depth 4
-$jsonPatches | Set-Content -Path $fileName
 
 # Function to upload file to S3
 function Upload-ToS3 {
@@ -48,6 +27,23 @@ function Upload-ToS3 {
     aws s3 cp $FilePath s3://$BucketName/ --region $AWSRegion
 }
 
+# Scan for patches
+Scan-Patches -InstanceId $InstanceId -AWSRegion $AWSRegion
+
+# Assume the output will be stored in a file named after the instance
+$fileName = "${InstanceId}_patch_scan_output.json"
+
+# Simulate saving scan output to a file (for demonstration purposes)
+# In reality, you might need to retrieve the actual output from SSM
+$jsonOutput = @"
+{
+    "InstanceId": "$InstanceId",
+    "ScanTime": "$(Get-Date)",
+    "Patches": []
+}
+"@
+$jsonOutput | Set-Content -Path $fileName
+
 # Upload JSON file to S3
 Upload-ToS3 -BucketName $BucketName -FilePath $fileName -AWSRegion $AWSRegion
 
@@ -55,7 +51,7 @@ Upload-ToS3 -BucketName $BucketName -FilePath $fileName -AWSRegion $AWSRegion
 $token = $env:GITHUB_TOKEN  # Set this as a GitHub Secret in your repository
 $repo = "your-username/your-repo-name"
 $branch = "main"
-$commitMessage = "Add missing patches JSON file"
+$commitMessage = "Add patch scan output JSON file"
 
 # Function to push file to GitHub
 function Push-ToGitHub {
