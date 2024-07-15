@@ -15,7 +15,7 @@ function Scan-Patches {
     $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters 'Operation=Scan' --region $AWSRegion"
     Invoke-Expression $scanCommand
 }
-
+#git
 # Function to upload file to S3
 function Upload-ToS3 {
     param (
