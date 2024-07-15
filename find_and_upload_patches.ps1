@@ -4,21 +4,21 @@ param (
     [string]$AWSRegion = "us-east-1"
 )
 
-# Function to get patch states for the instance
-function Get-PatchState {
+# Function to get patch information for the instance
+function Get-PatchInfo {
     param (
         [string]$InstanceId,
         [string]$AWSRegion
     )
-    Write-Output "Retrieving patch states for instance $InstanceId in region $AWSRegion"
+    Write-Output "Retrieving patch information for critical and important security patches on instance $InstanceId in region $AWSRegion"
 
-    $patchStateCommand = "aws ssm describe-instance-patch-states --instance-ids $InstanceId --region $AWSRegion"
+    $patchInfoCommand = "aws ssm describe-instance-patches --instance-id $InstanceId --filters Key=Classification,Values=Security Key=Severity,Values=Critical,Important --region $AWSRegion"
     try {
-        $result = Invoke-Expression $patchStateCommand
-        $patchState = ($result | ConvertFrom-Json).InstancePatchStates[0]
-        return $patchState
+        $result = Invoke-Expression $patchInfoCommand
+        $patchInfo = ($result | ConvertFrom-Json).Patches
+        return $patchInfo
     } catch {
-        Write-Error "Failed to retrieve patch state: $_"
+        Write-Error "Failed to retrieve patch information: $_"
         exit 1
     }
 }
@@ -87,12 +87,12 @@ try {
         exit 1
     }
 
-    # Retrieve patch state
-    $patchState = Get-PatchState -InstanceId $InstanceId -AWSRegion $AWSRegion
+    # Retrieve patch information
+    $patchInfo = Get-PatchInfo -InstanceId $InstanceId -AWSRegion $AWSRegion
 
     # Save the output to a file
-    $fileName = "${InstanceId}_patch_state_output.json"
-    $patchState | ConvertTo-Json -Compress | Set-Content -Path $fileName
+    $fileName = "${InstanceId}_patch_info_output.json"
+    $patchInfo | ConvertTo-Json -Compress | Set-Content -Path $fileName
 
     # Upload JSON file to S3
     Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
@@ -100,7 +100,7 @@ try {
     # Push the JSON file to GitHub
     $repo = "your-username/your-repo-name"
     $branch = "main"
-    $commitMessage = "Add patch state output JSON file"
+    $commitMessage = "Add patch info output JSON file"
     Push-ToGitHub -token $token -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
 } catch {
     Write-Error "An error occurred during script execution: $_"
