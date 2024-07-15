@@ -87,21 +87,21 @@ try {
     # Simulate saving scan output to a file (for demonstration purposes)
     # In reality, you might need to retrieve the actual output from SSM
     $jsonOutput = @"
-    {
-        "InstanceId": "$InstanceId",
-        "ScanTime": "$(Get-Date)",
-        "Patches": [
-            {
-                "Title": "Example Patch 1",
-                "Severity": "Critical"
-            },
-            {
-                "Title": "Example Patch 2",
-                "Severity": "Important"
-            }
-        ]
-    }
-    "@
+{
+    "InstanceId": "$InstanceId",
+    "ScanTime": "$(Get-Date)",
+    "Patches": [
+        {
+            "Title": "Example Patch 1",
+            "Severity": "Critical"
+        },
+        {
+            "Title": "Example Patch 2",
+            "Severity": "Important"
+        }
+    ]
+}
+"@
     $jsonOutput | Set-Content -Path $fileName
 
     # Upload JSON file to S3
