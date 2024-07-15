@@ -1,0 +1,48 @@
+
+name: Check Security Patches
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check_patches:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-cli@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Execute SSM Command to Check Patches
+        id: check_patches
+        run: |
+          aws ssm send-command \
+            --document-name "AWS-RunPowerShellScript" \
+            --targets "Key=instanceIds,Values=i-01a7d5d948f6b49c9" \
+            --parameters commands=["powershell -File C:\path\to\your\script\check_security_patches.ps1"] \
+            --comment "Check for available security patches and upload to S3" \
+            --output text
+
+      - name: Fetch Patch List from S3
+        run: |
+          aws s3 cp s3://mybuckettest2188/i-01a7d5d948f6b49c9/security_patches.txt ./security_patches.txt
+
+      - name: Create a PR with the Patch List
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git checkout -b patch-list-update
+          echo "## Security Patches" > PATCH_LIST.md
+          cat security_patches.txt >> PATCH_LIST.md
+          git add PATCH_LIST.md
+          git commit -m "Update security patch list"
+          git push origin patch-list-update
+          gh pr create --title "Security Patch List Update" --body "This PR contains the latest security patch list." --base main --head patch-list-update
