@@ -2,7 +2,9 @@ param (
     [string]$InstanceId = "i-01a7d5d948f6b49c9",
     [string]$BucketArn = "arn:aws:s3:::mybuckettest2188",
     [string]$AWSRegion = "us-east-1",
-    [string]$GitHubToken = "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"
+    [string]$GitHubToken = "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",
+    [string]$repo = "your-username/your-repo-name",
+    [string]$branch = "main"
 )
 
 # Function to get patch information for the instance
@@ -92,8 +94,6 @@ try {
     Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
 
     # Push the JSON file to GitHub
-    $repo = "your-username/your-repo-name"
-    $branch = "main"
     $commitMessage = "Add patch info output JSON file"
     Push-ToGitHub -GitHubToken $GitHubToken -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
 } catch {
