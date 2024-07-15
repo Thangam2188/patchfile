@@ -4,18 +4,24 @@ param (
     [string]$AWSRegion = "us-east-1"
 )
 
-# Function to scan for patches
+# Function to scan for critical and important patches
 function Scan-Patches {
     param (
         [string]$InstanceId,
         [string]$AWSRegion
     )
-    Write-Output "Scanning patches for instance $InstanceId in region $AWSRegion"
+    Write-Output "Scanning for critical and important security patches on instance $InstanceId in region $AWSRegion"
 
-    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters 'Operation=Scan' --region $AWSRegion"
-    Invoke-Expression $scanCommand
+    $scanCommand = "aws ssm send-command --instance-ids $InstanceId --document-name 'AWS-RunPatchBaseline' --parameters '{""Operation"":[""Scan""],""SeverityLevels"":[""Critical"",""Important""]}' --region $AWSRegion"
+    try {
+        $result = Invoke-Expression $scanCommand
+        return $result
+    } catch {
+        Write-Error "Failed to send SSM command: $_"
+        exit 1
+    }
 }
-#git
+
 # Function to upload file to S3
 function Upload-ToS3 {
     param (
@@ -26,34 +32,13 @@ function Upload-ToS3 {
     Write-Output "Uploading $FilePath to S3 bucket $BucketArn"
     $bucketName = $BucketArn -replace "arn:aws:s3:::",""
     $s3Command = "aws s3 cp $FilePath s3://$bucketName/ --region $AWSRegion"
-    Invoke-Expression $s3Command
+    try {
+        Invoke-Expression $s3Command
+    } catch {
+        Write-Error "Failed to upload to S3: $_"
+        exit 1
+    }
 }
-
-# Scan for patches
-Scan-Patches -InstanceId $InstanceId -AWSRegion $AWSRegion
-
-# Assume the output will be stored in a file named after the instance
-$fileName = "${InstanceId}_patch_scan_output.json"
-
-# Simulate saving scan output to a file (for demonstration purposes)
-# In reality, you might need to retrieve the actual output from SSM
-$jsonOutput = @"
-{
-    "InstanceId": "$InstanceId",
-    "ScanTime": "$(Get-Date)",
-    "Patches": []
-}
-"@
-$jsonOutput | Set-Content -Path $fileName
-
-# Upload JSON file to S3
-Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
-
-# Define GitHub parameters
-$token = $env:GITHUB_TOKEN  # Ensure this is set as a GitHub Secret in your repository
-$repo = "your-username/your-repo-name"
-$branch = "main"
-$commitMessage = "Add patch scan output JSON file"
 
 # Function to push file to GitHub
 function Push-ToGitHub {
@@ -83,8 +68,52 @@ function Push-ToGitHub {
         "Content-Type" = "application/json"
     }
 
-    Invoke-RestMethod -Uri $uri -Method PUT -Headers $headers -Body $body
+    try {
+        Invoke-RestMethod -Uri $uri -Method PUT -Headers $headers -Body $body
+    } catch {
+        Write-Error "Failed to push to GitHub: $_"
+        exit 1
+    }
 }
 
-# Push the JSON file to GitHub
-Push-ToGitHub -token $token -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
+# Main script execution
+try {
+    # Scan for patches
+    $scanResult = Scan-Patches -InstanceId $InstanceId -AWSRegion $AWSRegion
+
+    # Assume the output will be stored in a file named after the instance
+    $fileName = "${InstanceId}_patch_scan_output.json"
+
+    # Simulate saving scan output to a file (for demonstration purposes)
+    # In reality, you might need to retrieve the actual output from SSM
+    $jsonOutput = @"
+    {
+        "InstanceId": "$InstanceId",
+        "ScanTime": "$(Get-Date)",
+        "Patches": [
+            {
+                "Title": "Example Patch 1",
+                "Severity": "Critical"
+            },
+            {
+                "Title": "Example Patch 2",
+                "Severity": "Important"
+            }
+        ]
+    }
+    "@
+    $jsonOutput | Set-Content -Path $fileName
+
+    # Upload JSON file to S3
+    Upload-ToS3 -BucketArn $BucketArn -FilePath $fileName -AWSRegion $AWSRegion
+
+    # Push the JSON file to GitHub
+    $token = $env:GITHUB_TOKEN  # Ensure this is set as a GitHub Secret in your repository
+    $repo = "your-username/your-repo-name"
+    $branch = "main"
+    $commitMessage = "Add patch scan output JSON file"
+    Push-ToGitHub -token $token -repo $repo -branch $branch -filePath $fileName -commitMessage $commitMessage
+} catch {
+    Write-Error "An error occurred during script execution: $_"
+    exit 1
+}
