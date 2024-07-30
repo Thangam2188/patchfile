@@ -26,7 +26,7 @@ jobs:
           aws ssm send-command \
             --document-name "AWS-RunPowerShellScript" \
             --targets "Key=instanceIds,Values=i-0441ba81fb9000eec" \
-            --parameters commands=["powershell -File C:\\path\\to\\your\\script\\find_and_upload_patches.ps1 -BucketArn arn:aws:s3:::mybuckettest2188 -AWSRegion us-east-1"] \
+            --parameters commands=["powershell -File C:\\path\\to\\your\\script\\find_and_upload_patches.ps1 -BucketArn arn:aws:s3:::sycdel-test2 -AWSRegion us-east-1"] \
             --comment "Check for available security patches and upload to S3" \
             --output text
 
@@ -34,5 +34,3 @@ jobs:
         run: |
           aws s3 cp s3://sycdel-test2/i-0441ba81fb9000eec/security_patches.txt ./security_patches.txt --region us-east-1
           cat ./security_patches.txt
-
-          ### comment to check
