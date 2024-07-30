@@ -1,9 +1,13 @@
-# check_security_patches.ps1
+# find_and_upload_patches.ps1
+
+param (
+    [string]$BucketArn,
+    [string]$AWSRegion
+)
 
 # Define variables
 $instanceId = "i-0441ba81fb9000eec"
 $bucketName = "sycdel-test2"
-$region = "us-east-1"
 $patchFile = "C:\temp\security_patches.txt"
 
 # Ensure the output directory exists
@@ -33,7 +37,11 @@ $securityUpdates | ForEach-Object {
     "$($_.Title) - $($_.MsrcSeverity)" 
 } | Out-File -FilePath $patchFile
 
-# Upload the file to S3
-aws s3 cp $patchFile "s3://$bucketName/$instanceId/security_patches.txt" --region $region
-
-Write-Host "Security patches have been listed and uploaded to S3."
+# Upload the file to S3 and handle potential errors
+try {
+    aws s3 cp $patchFile "s3://$bucketName/$instanceId/security_patches.txt" --region $AWSRegion
+    Write-Host "Security patches have been listed and uploaded to S3."
+} catch {
+    Write-Host "Failed to upload security patches to S3. Error: $_"
+    exit 1
+}
