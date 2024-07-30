@@ -25,12 +25,12 @@ jobs:
         run: |
           aws ssm send-command \
             --document-name "AWS-RunPowerShellScript" \
-            --targets "Key=instanceIds,Values=i-01a7d5d948f6b49c9" \
-            --parameters commands=["powershell -File C:\path\to\your\script\check_security_patches.ps1"] \
+            --targets "Key=instanceIds,Values=i-0441ba81fb9000eec" \
+            --parameters commands=["powershell -ExecutionPolicy Bypass -File C:\\path\\to\\your\\script\\check_security_patches.ps1"] \
             --comment "Check for available security patches and upload to S3" \
             --output text
 
       - name: Fetch Patch List from S3
         run: |
-          aws s3 cp s3://mybuckettest2188/i-01a7d5d948f6b49c9/security_patches.txt ./security_patches.txt
+          aws s3 cp s3://sycdel-test2/i-0441ba81fb9000eec/security_patches.txt ./security_patches.txt --region us-east-1
           cat ./security_patches.txt
