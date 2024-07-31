@@ -1,5 +1,3 @@
-# find_and_upload_patches.ps1
-
 param (
     [string]$BucketArn,
     [string]$AWSRegion
