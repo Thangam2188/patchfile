@@ -20,17 +20,34 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      - name: Obtain Temporary Credentials with MFA
+        id: get_session_token
+        run: |
+          MFA_ARN="arn:aws:iam::472598590798:mfa/dev_mfa"
+          MFA_CODE="${{ secrets.MFA_CODE }}"
+          TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json)
+          echo "::set-output name=aws_access_key_id::$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')"
+          echo "::set-output name=aws_secret_access_key::$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')"
+          echo "::set-output name=aws_session_token::$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')"
+
+      - name: Configure AWS CLI with Temporary Credentials
+        run: |
+          aws configure set aws_access_key_id ${{ steps.get_session_token.outputs.aws_access_key_id }} --profile temp-mfa
+          aws configure set aws_secret_access_key ${{ steps.get_session_token.outputs.aws_secret_access_key }} --profile temp-mfa
+          aws configure set aws_session_token ${{ steps.get_session_token.outputs.aws_session_token }} --profile temp-mfa
+          aws configure set region us-east-1 --profile temp-mfa
+
       - name: Execute SSM Command to Check Patches
-        id: check_patches
         run: |
           aws ssm send-command \
             --document-name "AWS-RunPowerShellScript" \
             --targets "Key=instanceIds,Values=i-0441ba81fb9000eec" \
             --parameters commands=["powershell -File C:\\path\\to\\your\\script\\find_and_upload_patches.ps1 -BucketArn arn:aws:s3:::sycdel-test2 -AWSRegion us-east-1"] \
             --comment "Check for available security patches and upload to S3" \
-            --output text
+            --output text \
+            --profile temp-mfa
 
       - name: Fetch Patch List from S3
         run: |
-          aws s3 cp s3://sycdel-test2/i-0441ba81fb9000eec/security_patches.txt ./security_patches.txt --region us-east-1
+          aws s3 cp s3://sycdel-test2/i-0441ba81fb9000eec/security_patches.txt ./security_patches.txt --region us-east-1 --profile temp-mfa
           cat ./security_patches.txt
