@@ -14,21 +14,23 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Install dependencies
+      - name: Execute SSM Command to Check Patches
+        id: check_patches
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-          sudo apt-get install -y pwsh
+          aws ssm send-command \
+            --document-name "AWS-RunPowerShellScript" \
+            --targets "Key=instanceIds,Values=i-0441ba81fb9000eec" \
+            --parameters commands=["powershell -File C:\\path\\to\\your\\script\\find_and_upload_patches.ps1 -BucketArn arn:aws:s3:::sycdel-test2 -AWSRegion us-east-1"] \
+            --comment "Check for available security patches and upload to S3" \
+            --output text
 
-      - name: Execute script with MFA
+      - name: Fetch Patch List from S3
         run: |
-          chmod +x run_with_mfa.sh
-          ./run_with_mfa.sh
-        env:
-          MFA_CODE: ${{ secrets.MFA_CODE }}
+          aws s3 cp s3://sycdel-test2/i-0441ba81fb9000eec/security_patches.txt ./security_patches.txt --region us-east-1
+          cat ./security_patches.txt
