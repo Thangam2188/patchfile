@@ -1,6 +1,9 @@
 param (
     [string]$BucketArn,
-    [string]$AWSRegion
+    [string]$AWSRegion,
+    [string]$AWSAccessKeyId,
+    [string]$AWSSecretAccessKey,
+    [string]$AWSSessionToken
 )
 
 # Define variables
@@ -34,6 +37,11 @@ $securityUpdates = $updates | Where-Object {
 $securityUpdates | ForEach-Object {
     "$($_.Title) - $($_.MsrcSeverity)" 
 } | Out-File -FilePath $patchFile
+
+# Set AWS environment variables for temporary credentials
+$env:AWS_ACCESS_KEY_ID = $AWSAccessKeyId
+$env:AWS_SECRET_ACCESS_KEY = $AWSSecretAccessKey
+$env:AWS_SESSION_TOKEN = $AWSSessionToken
 
 # Upload the file to S3 and handle potential errors
 try {
