@@ -1,0 +1,41 @@
+name: Check Security Patches on Red Hat via SSM
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1'  # Run every Monday at midnight UTC
+
+jobs:
+  check_security_patches:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Check for security patches via SSM
+        run: |
+          # Run the command on the instance using SSM
+          aws ssm send-command \
+            --instance-ids i-008e8f3c90e3bee1a \
+            --document-name "AWS-RunShellScript" \
+            --comment "Check critical and important security patches" \
+            --parameters 'commands=["sudo yum updateinfo list security | grep -E \"Critical|Important\""]' \
+            --output text \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: Fetch command output
+        run: |
+          # Fetch the command invocation result
+          aws ssm list-command-invocations \
+            --instance-id i-008e8f3c90e3bee1a \
+            --details \
+            --query "CommandInvocations[].CommandPlugins[].Output" \
+            --output text
