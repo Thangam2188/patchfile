@@ -58,6 +58,7 @@ jobs:
             --comment "Check critical and important security patches and upload to S3" \
             --parameters 'commands=["/path/to/check_and_upload_patches.sh"]' \
             --output text
+            
 - name: Install AWS CLI
   run: |
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
