@@ -12,6 +12,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+- name: Install AWS CLI
+  run: |
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    sudo ./aws/install
+    aws --version  # Confirm installation
+- name: Verify AWS CLI Configuration
+  run: |
+    aws sts get-caller-identity --debug
 
       - name: Install dependencies
         run: |
@@ -59,12 +68,3 @@ jobs:
             --parameters 'commands=["/path/to/check_and_upload_patches.sh"]' \
             --output text
             
-- name: Install AWS CLI
-  run: |
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-    unzip awscliv2.zip
-    sudo ./aws/install
-    aws --version  # Confirm installation
-- name: Verify AWS CLI Configuration
-  run: |
-    aws sts get-caller-identity --debug
