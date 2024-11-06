@@ -1,4 +1,4 @@
-name: Check Security Patches with MFA
+name: Check Security Patches and Store in S3 with MFA
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTMFA"  # Replace with your actual MFA ARN
+          MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT"  # Use your specific MFA ARN here
         run: |
           # Generate the MFA code using oathtool
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
@@ -32,29 +32,6 @@ jobs:
           # Get temporary credentials using the generated MFA code
           TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json)
 
-          # Export the temporary credentials
+          # Export the temporary credentials as outputs
           echo "::set-output name=aws_access_key_id::$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')"
-          echo "::set-output name=aws_secret_access_key::$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')"
-          echo "::set-output name=aws_session_token::$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')"
-
-      - name: Configure AWS CLI with Temporary Credentials
-        env:
-          AWS_ACCESS_KEY_ID: ${{ steps.mfa_creds.outputs.aws_access_key_id }}
-          AWS_SECRET_ACCESS_KEY: ${{ steps.mfa_creds.outputs.aws_secret_access_key }}
-          AWS_SESSION_TOKEN: ${{ steps.mfa_creds.outputs.aws_session_token }}
-        run: |
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
-          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
-          aws configure set region us-east-1 --profile temp-mfa
-
-      - name: Execute SSM Command to Check Patches and Upload to S3
-        env:
-          AWS_PROFILE: temp-mfa
-        run: |
-          aws ssm send-command \
-            --instance-ids i-008e8f3c90e3bee1a \
-            --document-name "AWS-RunShellScript" \
-            --comment "Check critical and important security patches and upload to S3" \
-            --parameters 'commands=["/path/to/check_and_upload_patches.sh"]' \
-            --output text
+          echo "::set-output name=aws_secret_access_key::$(echo $TEMP_CRED
