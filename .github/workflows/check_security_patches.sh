@@ -1,5 +1,25 @@
 #!/bin/bash
 
+# Generate the MFA code using oathtool
+MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
+
+# Attempt to get temporary credentials and capture debug output
+echo "MFA_CODE: $MFA_CODE"
+TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json --debug 2>&1)
+STATUS=$?
+
+# Check if the command was successful
+if [ $STATUS -ne 0 ]; then
+  echo "Error obtaining temporary credentials: $TEMP_CREDS"
+  exit $STATUS
+fi
+
+# Export the temporary credentials as outputs
+echo "::set-output name=aws_access_key_id::$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')"
+echo "::set-output name=aws_secret_access_key::$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')"
+echo "::set-output name=aws_session_token::$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')"
+
+
 # Define variables
 BUCKET_NAME="testpatchscript"
 REGION="us-east-1"  # Adjust if needed
