@@ -12,12 +12,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+        
+      - name: Verify AWS CLI Configuration
+        run: |
+            aws sts get-caller-identity --debug
 
-- name: Verify AWS CLI Configuration
-  run: |
-    aws sts get-caller-identity --debug
-
-      - name: Install dependencies
+      - name: Install dependencies  
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq
