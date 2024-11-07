@@ -18,6 +18,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y oathtool jq
 
+     - name: Verify AWS CLI Credentials
+        run: |
+          aws sts get-caller-identity --debug
+
+
       - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
         env:
