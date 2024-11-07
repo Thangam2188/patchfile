@@ -18,24 +18,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y oathtool jq
 
-      - name: Generate MFA Code and Get Temporary AWS Credentials
-        id: mfa_creds
-        env:
-          MFA_SECRET: ${{ secrets.MFA_SECRET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT1"
-        run: |
-          # Generate the MFA code using oathtool
-          MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
+- name: Generate MFA Code and Get Temporary AWS Credentials
+  id: mfa_creds
+  env:
+    MFA_SECRET: ${{ secrets.MFA_SECRET }}
+    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT1"
+  run: |
+    # Generate the MFA code using oathtool
+    MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
+    echo "Generated MFA Code: $MFA_CODE"
 
-          # Get temporary credentials using the generated MFA code
-          TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json)
+    # Attempt to get temporary credentials and capture any errors
+    TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json 2>&1)
+    STATUS=$?
 
-          # Export the temporary credentials as outputs
-          echo "::set-output name=aws_access_key_id::$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')"
-          echo "::set-output name=aws_secret_access_key::$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')"
-          echo "::set-output name=aws_session_token::$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')"
+    # Check if the command was successful
+    if [ $STATUS -ne 0 ]; then
+      echo "Error obtaining temporary credentials: $TEMP_CREDS"
+      exit $STATUS
+    fi
+
+    # Parse and set temporary credentials
+    echo "::set-output name=aws_access_key_id::$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')"
+    echo "::set-output name=aws_secret_access_key::$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')"
+    echo "::set-output name=aws_session_token::$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')"
+
 
       - name: Configure AWS CLI with Temporary Credentials
         env:
