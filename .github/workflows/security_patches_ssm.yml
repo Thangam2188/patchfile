@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y oathtool jq
+          sudo apt-get install -y oathtool jq awscli
 
       - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
@@ -72,3 +72,15 @@ jobs:
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
+
+      - name: Send SSM Command to Execute check_security_patches.sh on EC2
+        env:
+          AWS_PROFILE: temp-mfa
+        run: |
+          INSTANCE_ID="i-008e8f3c90e3bee1a"  # Replace with your EC2 instance ID
+          aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=['/path/to/check_security_patches.sh']" \
+            --comment "Check security patches and upload results to S3" \
+            --output text
