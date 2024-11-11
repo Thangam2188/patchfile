@@ -1,4 +1,24 @@
-     - name: Generate MFA Code and Get Temporary AWS Credentials
+name: Check Security Patches and Store in S3 with MFA
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # Run every Monday at midnight UTC
+
+jobs:
+  check_security_patches:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y oathtool jq
+
+      - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
         env:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
