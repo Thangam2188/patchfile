@@ -59,21 +59,21 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ steps.mfa_creds.outputs.aws_access_key_id }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.mfa_creds.outputs.aws_secret_access_key }}
           AWS_SESSION_TOKEN: ${{ steps.mfa_creds.outputs.aws_session_token }}
-          AWS_DEFAULT_REGION: "us-east-1"  # Set your region explicitly here
+          AWS_DEFAULT_REGION: "us-east-1"
         run: |
+          # Debugging: Print the environment variables to verify they have values
+          echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+          echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
+          echo "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN"
+
+          # Ensure variables are not empty
+          if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$AWS_SECRET_ACCESS_KEY" || -z "$AWS_SESSION_TOKEN" ]]; then
+            echo "Error: AWS credentials are missing."
+            exit 1
+          fi
+
+          # Configure the AWS CLI profile
           aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
-
-      - name: Execute SSM Command to Check Patches and Upload to S3
-        env:
-          AWS_PROFILE: temp-mfa
-          AWS_DEFAULT_REGION: "us-east-1"  # Set your region explicitly here
-        run: |
-          aws ssm send-command \
-            --instance-ids i-008e8f3c90e3bee1a \
-            --document-name "AWS-RunShellScript" \
-            --comment "Check critical and important security patches and upload to S3" \
-            --parameters 'commands=["/path/to/check_and_upload_patches.sh"]' \
-            --output text
