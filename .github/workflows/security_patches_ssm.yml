@@ -24,17 +24,16 @@
             exit $STATUS
           fi
 
-          # Parse and set temporary credentials as outputs
-          echo "::set-output name=aws_access_key_id::$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')"
-          echo "::set-output name=aws_secret_access_key::$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')"
-          echo "::set-output name=aws_session_token::$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')"
-
+          # Parse and set temporary credentials as environment variables
+          echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
       - name: Configure AWS CLI with Temporary Credentials
         env:
-          AWS_ACCESS_KEY_ID: ${{ steps.mfa_creds.outputs.aws_access_key_id }}
-          AWS_SECRET_ACCESS_KEY: ${{ steps.mfa_creds.outputs.aws_secret_access_key }}
-          AWS_SESSION_TOKEN: ${{ steps.mfa_creds.outputs.aws_session_token }}
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
           AWS_DEFAULT_REGION: "us-east-1"
         run: |
           # Debugging: Print the environment variables to verify they have values
