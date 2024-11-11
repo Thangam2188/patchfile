@@ -1,4 +1,4 @@
-      - name: Generate MFA Code and Get Temporary AWS Credentials
+ - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
         env:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
