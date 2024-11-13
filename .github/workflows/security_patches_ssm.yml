@@ -1,4 +1,4 @@
-name: Check Security Patches and Store in S3 with MFA
+name: Run Security Patches Check on EC2 via SSM
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: '0 0 * * 1' # Run every Monday at midnight UTC
 
 jobs:
-  check_security_patches:
+  run_patches_script:
     runs-on: ubuntu-latest
 
     steps:
@@ -49,44 +49,44 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
-      - name: Run check_security_patches.sh
+      - name: Configure AWS CLI with Temporary Credentials
         env:
           AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
           AWS_DEFAULT_REGION: "us-east-1"
+        run: |
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
+          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
+          aws configure set region us-east-1 --profile temp-mfa
+
+      - name: Run the Security Patches Script via SSM
+        env:
+          AWS_PROFILE: temp-mfa
           BUCKET_NAME: "testpatchscript"
         run: |
-          # Define the instance ID and output file path
-          INSTANCE_ID="github-action-run"  # Identify that it's run from GitHub Actions
-          OUTPUT_FILE="/tmp/security_patches.txt"
+          # Define instance ID and script location
+          INSTANCE_ID="i-008e8f3c90e3bee1a"
+          S3_BUCKET="$BUCKET_NAME"
+          SCRIPT_PATH="/tmp/check_security_patches.sh"
 
-          echo "Starting security patch check script..." | tee -a /tmp/debug.log
+          # Upload the script to the instance
+          echo "Uploading script to SSM..."
+          aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --comment "Uploading patch script" \
+            --parameters "commands=[\"cat > $SCRIPT_PATH <<'EOF'\",$(cat check_security_patches.sh),\"chmod +x $SCRIPT_PATH\"]" \
+            --output text
 
-          # Check for critical and important security patches and save the output
-          echo "Checking for critical and important security patches..." | tee -a /tmp/debug.log
-          if command -v yum &> /dev/null; then
-              sudo yum updateinfo list security | grep -E 'Critical|Important' > $OUTPUT_FILE
-              echo "Patch check completed with yum." | tee -a /tmp/debug.log
-          elif command -v dnf &> /dev/null; then
-              sudo dnf updateinfo list security | grep -E 'Critical|Important' > $OUTPUT_FILE
-              echo "Patch check completed with dnf." | tee -a /tmp/debug.log
-          else
-              echo "Neither yum nor dnf are installed. Cannot perform patch check." > $OUTPUT_FILE
-              echo "Error: No suitable package manager found." | tee -a /tmp/debug.log
-          fi
+          # Run the script on the EC2 instance
+          echo "Running patch check script on EC2..."
+          aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --comment "Check critical and important security patches and upload results to S3" \
+            --parameters "commands=[\"$SCRIPT_PATH\"]" \
+            --output text
 
-          # Display contents of the output file for verification
-          echo "Contents of $OUTPUT_FILE:" | tee -a /tmp/debug.log
-          cat $OUTPUT_FILE | tee -a /tmp/debug.log
-
-          # Upload the file to S3
-          echo "Attempting to upload the patch report to S3..." | tee -a /tmp/debug.log
-          aws s3 cp $OUTPUT_FILE s3://$BUCKET_NAME/$INSTANCE_ID/security_patches.txt --region us-east-1 | tee -a /tmp/debug.log
-
-          # Check if the upload was successful
-          if [ $? -eq 0 ]; then
-              echo "File successfully uploaded to S3." | tee -a /tmp/debug.log
-          else
-              echo "Failed to upload the file to S3." | tee -a /tmp/debug.log
-          fi
+          echo "Security patches script executed via SSM."
