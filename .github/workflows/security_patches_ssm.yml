@@ -1,128 +1,65 @@
-name: Run Security Patches Check on EC2 via SSM
+  - name: Run Security Patch Script via SSM
+  env:
+    AWS_PROFILE: temp-mfa
+    S3_BUCKET: testpatchscript
+  run: |
+    # Define instance ID and result file path
+    INSTANCE_ID="i-008e8f3c90e3bee1a"
+    RESULT_FILE="/usr/bin/security_patches.txt"
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 1' # Run every Monday at midnight UTC
+    # Run the script on the EC2 instance with elevated privileges
+    echo "Running patch check script on EC2 with sudo..."
+    COMMAND_ID=$(aws ssm send-command \
+      --instance-ids $INSTANCE_ID \
+      --document-name "AWS-RunShellScript" \
+      --comment "Check critical and important security patches and upload results to S3" \
+      --parameters commands=["sudo /usr/bin/check_security_patches.sh","sudo chmod 644 /usr/bin/security_patches.txt"] \
+      --query "Command.CommandId" \
+      --output text)
 
-jobs:
-  run_patches_script:
-    runs-on: ubuntu-latest
+    # Wait for the command to complete
+    echo "Waiting for command to complete..."
+    aws ssm wait command-executed --command-id $COMMAND_ID --instance-id $INSTANCE_ID
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+    # Verify the result file exists
+    echo "Verifying if the result file exists on the EC2 instance..."
+    FILE_EXISTS_COMMAND_ID=$(aws ssm send-command \
+      --instance-ids $INSTANCE_ID \
+      --document-name "AWS-RunShellScript" \
+      --parameters commands=["if [ -f /usr/bin/security_patches.txt ]; then echo File exists; else echo File not found; fi"] \
+      --query "Command.CommandId" \
+      --output text)
+    aws ssm wait command-executed --command-id $FILE_EXISTS_COMMAND_ID --instance-id $INSTANCE_ID
+    FILE_STATUS=$(aws ssm get-command-invocation \
+      --command-id $FILE_EXISTS_COMMAND_ID \
+      --instance-id $INSTANCE_ID \
+      --query "StandardOutputContent" \
+      --output text)
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y oathtool jq awscli
+    if [[ "$FILE_STATUS" != "File exists" ]]; then
+      echo "Error: The result file does not exist on the EC2 instance."
+      exit 1
+    fi
 
-      - name: Generate MFA Code and Get Temporary AWS Credentials
-        id: mfa_creds
-        env:
-          MFA_SECRET: ${{ secrets.MFA_SECRET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT1"
-          AWS_DEFAULT_REGION: "us-east-1"
-        run: |
-          # Generate the MFA code using oathtool
-          MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
-          echo "Generated MFA Code: $MFA_CODE"
+    # Fetch and print the contents of the result file for debugging
+    echo "Fetching result file contents..."
+    FILE_CONTENTS_COMMAND_ID=$(aws ssm send-command \
+      --instance-ids $INSTANCE_ID \
+      --document-name "AWS-RunShellScript" \
+      --parameters commands=["sudo cat /usr/bin/security_patches.txt"] \
+      --query "Command.CommandId" \
+      --output text)
+    aws ssm wait command-executed --command-id $FILE_CONTENTS_COMMAND_ID --instance-id $INSTANCE_ID
+    FILE_CONTENTS=$(aws ssm get-command-invocation \
+      --command-id $FILE_CONTENTS_COMMAND_ID \
+      --instance-id $INSTANCE_ID \
+      --query "StandardOutputContent" \
+      --output text)
+    echo "Result File Contents:"
+    echo "$FILE_CONTENTS"
 
-          # Attempt to get temporary credentials and capture any errors
-          TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json)
-          STATUS=$?
+    # Upload the result file to S3
+    echo "Uploading result file to S3..."
+    aws s3 cp $RESULT_FILE s3://$S3_BUCKET/$INSTANCE_ID/security_patches.txt --region us-east-1
 
-          # Debugging: Print the result of aws sts get-session-token
-          echo "TEMP_CREDS response: $TEMP_CREDS"
-
-          # Check if the command was successful
-          if [ $STATUS -ne 0 ]; then
-            echo "Error obtaining temporary credentials: $TEMP_CREDS"
-            exit $STATUS
-          fi
-
-          # Parse and set temporary credentials as environment variables
-          echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
-
-      - name: Configure AWS CLI with Temporary Credentials
-        env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
-          AWS_DEFAULT_REGION: "us-east-1"
-        run: |
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
-          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
-          aws configure set region us-east-1 --profile temp-mfa
-
-      - name: Run Security Patch Script via SSM
-        env:
-          AWS_PROFILE: temp-mfa
-          S3_BUCKET: testpatchscript
-        run: |
-          # Define instance ID and result file path
-          INSTANCE_ID="i-008e8f3c90e3bee1a"
-          RESULT_FILE="/usr/bin/security_patches.txt"
-
-          # Run the script on the EC2 instance with elevated privileges
-          echo "Running patch check script on EC2 with sudo..."
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids $INSTANCE_ID \
-            --document-name "AWS-RunShellScript" \
-            --comment "Check critical and important security patches and upload results to S3" \
-            --parameters commands=["sudo /usr/bin/check_security_patches.sh","sudo chmod 644 /usr/bin/security_patches.txt"] \
-            --query "Command.CommandId" \
-            --output text)
-
-          # Wait for the command to complete
-          echo "Waiting for command to complete..."
-          aws ssm wait command-executed --command-id $COMMAND_ID --instance-id $INSTANCE_ID
-
-          # Verify the result file exists
-          echo "Verifying if the result file exists on the EC2 instance..."
-          FILE_EXISTS=$(aws ssm send-command \
-            --instance-ids $INSTANCE_ID \
-            --document-name "AWS-RunShellScript" \
-            --parameters commands=["if [[ -f /usr/bin/security_patches.txt ]]; then echo File exists; else echo File not found; fi"] \
-            --query "Command.CommandId" \
-            --output text)
-          aws ssm wait command-executed --command-id $FILE_EXISTS --instance-id $INSTANCE_ID
-          FILE_STATUS=$(aws ssm get-command-invocation \
-            --command-id $FILE_EXISTS \
-            --instance-id $INSTANCE_ID \
-            --query "StandardOutputContent" \
-            --output text)
-
-          if [[ "$FILE_STATUS" != "File exists" ]]; then
-            echo "Error: The result file does not exist on the EC2 instance."
-            exit 1
-          fi
-
-          # Fetch and print the contents of the result file for debugging
-          echo "Fetching result file contents..."
-          FILE_CONTENTS_COMMAND_ID=$(aws ssm send-command \
-            --instance-ids $INSTANCE_ID \
-            --document-name "AWS-RunShellScript" \
-            --parameters commands=["sudo cat /usr/bin/security_patches.txt"] \
-            --query "Command.CommandId" \
-            --output text)
-          aws ssm wait command-executed --command-id $FILE_CONTENTS_COMMAND_ID --instance-id $INSTANCE_ID
-          FILE_CONTENTS=$(aws ssm get-command-invocation \
-            --command-id $FILE_CONTENTS_COMMAND_ID \
-            --instance-id $INSTANCE_ID \
-            --query "StandardOutputContent" \
-            --output text)
-          echo "Result File Contents:"
-          echo "$FILE_CONTENTS"
-
-          # Upload the result file to S3
-          echo "Uploading result file to S3..."
-          aws s3 cp $RESULT_FILE s3://$S3_BUCKET/$INSTANCE_ID/security_patches.txt --region us-east-1
-
-          echo "Security patches report uploaded to S3 successfully."
+    echo "Security patches report uploaded to S3 successfully."
