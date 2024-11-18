@@ -64,11 +64,11 @@ jobs:
       - name: Run Security Patch Script via SSM
         env:
           AWS_PROFILE: temp-mfa
-          S3_BUCKET: "testpatchscript" # Replace with your bucket name
+          S3_BUCKET: testpatchscript # Replace with your bucket name
         run: |
           # Define instance ID and result file path
           INSTANCE_ID="i-008e8f3c90e3bee1a"
-          RESULT_FILE="/tmp/security_patches.txt"
+          RESULT_FILE="/usr/bin/security_patches.txt"
 
           # Run the script on the EC2 instance with elevated privileges
           echo "Running patch check script on EC2 with sudo..."
