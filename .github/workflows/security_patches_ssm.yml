@@ -27,24 +27,17 @@ jobs:
           MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT1"
           AWS_DEFAULT_REGION: "us-east-1"
         run: |
-          # Generate the MFA code using oathtool
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
 
-          # Attempt to get temporary credentials and capture any errors
           TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json)
           STATUS=$?
 
-          # Debugging: Print the result of aws sts get-session-token
-          echo "TEMP_CREDS response: $TEMP_CREDS"
-
-          # Check if the command was successful
           if [ $STATUS -ne 0 ]; then
             echo "Error obtaining temporary credentials: $TEMP_CREDS"
             exit $STATUS
           fi
 
-          # Parse and set temporary credentials as environment variables
           echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
@@ -61,17 +54,15 @@ jobs:
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-        - name: Upload and Run Security Patch Script via SSM
+      - name: Upload and Run Security Patch Script via SSM
         env:
           AWS_PROFILE: temp-mfa
           BUCKET_NAME: testpatchscript
         run: |
-          # Define instance ID and script location
           INSTANCE_ID="i-008e8f3c90e3bee1a"
           S3_BUCKET="$BUCKET_NAME"
           SCRIPT_PATH="/tmp/check_security_patches.sh"
 
-          # Upload the script to the instance
           echo "Uploading script to SSM..."
           SCRIPT_CONTENT=$(cat check_security_patches.sh | base64)
           aws ssm send-command \
@@ -84,7 +75,6 @@ jobs:
             ]" \
             --output text
 
-          # Run the script on the EC2 instance with elevated privileges
           echo "Running patch check script on EC2 with sudo..."
           aws ssm send-command \
             --instance-ids $INSTANCE_ID \
@@ -94,4 +84,3 @@ jobs:
             --output text
 
           echo "Security patches script executed via SSM with elevated privileges."
-
