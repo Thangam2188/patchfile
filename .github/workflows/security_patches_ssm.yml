@@ -58,6 +58,7 @@ jobs:
           INSTANCE_ID="i-008e8f3c90e3bee1a"
           RESULT_FILE="/usr/bin/security_patches.txt"
 
+          echo "Running patch check script on EC2 with sudo..."
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
@@ -68,6 +69,7 @@ jobs:
 
           aws ssm wait command-executed --command-id $COMMAND_ID --instance-id $INSTANCE_ID
 
+          echo "Verifying the result file exists and fetching content..."
           FILE_CONTENTS=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
@@ -80,9 +82,20 @@ jobs:
             --instance-id $INSTANCE_ID \
             --query "StandardOutputContent" \
             --output text)
+
+          if [ -z "$PATCH_REPORT" ]; then
+            echo "Error: Security patches file is empty or not accessible."
+            exit 1
+          fi
           echo "Result File Contents:"
           echo "$PATCH_REPORT"
 
-          echo "Uploading to S3..."
-          aws s3 cp /usr/bin/security_patches.txt s3://$S3_BUCKET/$INSTANCE_ID/security_patches.txt --region us-east-1 || \
-            echo "Error: Could not upload file. Verify permissions and path."
+          echo "Uploading result file to S3..."
+          aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["aws s3 cp /usr/bin/security_patches.txt s3://'$S3_BUCKET'/'$INSTANCE_ID'/security_patches.txt --region us-east-1"]}' \
+            --query "Command.CommandId" \
+            --output text
+          aws ssm wait command-executed --command-id $COMMAND_ID --instance-id $INSTANCE_ID
+          echo "Security patches report uploaded to S3 successfully."
