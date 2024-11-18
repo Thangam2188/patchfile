@@ -13,10 +13,7 @@
       --instance-ids $INSTANCE_ID \
       --document-name "AWS-RunShellScript" \
       --comment "Check critical and important security patches and upload results to S3" \
-      --parameters 'commands=[
-        "sudo /usr/bin/check_security_patches.sh",
-        "sudo chmod 644 /usr/bin/security_patches.txt"
-      ]' \
+      --parameters commands=["sudo /usr/bin/check_security_patches.sh","sudo chmod 644 /usr/bin/security_patches.txt"] \
       --query "Command.CommandId" \
       --output text)
 
@@ -29,7 +26,7 @@
     FILE_EXISTS=$(aws ssm send-command \
       --instance-ids $INSTANCE_ID \
       --document-name "AWS-RunShellScript" \
-      --parameters 'commands=["if [ -f /usr/bin/security_patches.txt ]; then echo File exists; else echo File not found; fi"]' \
+      --parameters commands=["if [ -f /usr/bin/security_patches.txt ]; then echo File exists; else echo File not found; fi"] \
       --query "Command.CommandId" \
       --output text)
     aws ssm wait command-executed --command-id $FILE_EXISTS --instance-id $INSTANCE_ID
@@ -49,7 +46,7 @@
     FILE_CONTENTS_COMMAND_ID=$(aws ssm send-command \
       --instance-ids $INSTANCE_ID \
       --document-name "AWS-RunShellScript" \
-      --parameters 'commands=["sudo cat /usr/bin/security_patches.txt"]' \
+      --parameters commands=["sudo cat /usr/bin/security_patches.txt"] \
       --query "Command.CommandId" \
       --output text)
     aws ssm wait command-executed --command-id $FILE_CONTENTS_COMMAND_ID --instance-id $INSTANCE_ID
