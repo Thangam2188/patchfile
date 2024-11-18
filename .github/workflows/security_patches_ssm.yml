@@ -122,6 +122,23 @@ jobs:
           echo "$FILE_CONTENTS"
 
           # Upload the result file to S3
+          - name: Upload Result to S3
+            env:
+              AWS_PROFILE: temp-mfa
+              S3_BUCKET: testpatchscript
+             
+            run: |
+              # Run the upload script via SSM
+              echo "Running upload script on EC2 instance..."
+              aws ssm send-command \
+                --instance-ids $INSTANCE_ID \
+                --document-name "AWS-RunShellScript" \
+                --comment "Upload result file to S3" \
+                --parameters "commands=[\"sudo /path/to/upload_to_s3.sh\"]" \
+                --output text
+  
+               echo "Upload script executed on EC2."
+  
           echo "Uploading result file to S3..."
           aws s3 cp $RESULT_FILE s3://$S3_BUCKET/$INSTANCE_ID/security_patches.txt --region us-east-1
 
