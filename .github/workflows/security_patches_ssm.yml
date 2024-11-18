@@ -61,10 +61,10 @@ jobs:
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-      - name: Run the Security Patches Script via SSM
+        - name: Upload and Run Security Patch Script via SSM
         env:
           AWS_PROFILE: temp-mfa
-          BUCKET_NAME: "testpatchscript"
+          BUCKET_NAME: testpatchscript
         run: |
           # Define instance ID and script location
           INSTANCE_ID="i-008e8f3c90e3bee1a"
@@ -73,20 +73,25 @@ jobs:
 
           # Upload the script to the instance
           echo "Uploading script to SSM..."
+          SCRIPT_CONTENT=$(cat check_security_patches.sh | base64)
           aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
             --comment "Uploading patch script" \
-            --parameters "commands=[\"cat > $SCRIPT_PATH <<'EOF'\",$(cat check_security_patches.sh),\"chmod +x $SCRIPT_PATH\"]" \
+            --parameters "commands=[
+              \"echo $SCRIPT_CONTENT | base64 --decode > $SCRIPT_PATH\",
+              \"chmod +x $SCRIPT_PATH\"
+            ]" \
             --output text
 
-          # Run the script on the EC2 instance
-          echo "Running patch check script on EC2..."
+          # Run the script on the EC2 instance with elevated privileges
+          echo "Running patch check script on EC2 with sudo..."
           aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
             --comment "Check critical and important security patches and upload results to S3" \
-            --parameters "commands=[\"$SCRIPT_PATH\"]" \
+            --parameters "commands=[\"sudo $SCRIPT_PATH\"]" \
             --output text
 
-          echo "Security patches script executed via SSM."
+          echo "Security patches script executed via SSM with elevated privileges."
+
