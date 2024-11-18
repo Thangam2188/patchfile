@@ -76,7 +76,10 @@ jobs:
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
             --comment "Check critical and important security patches and upload results to S3" \
-            --parameters "commands=[\"sudo /usr/bin/check_security_patches.sh\"]" \
+            --parameters "commands=[
+              \"sudo /usr/bin/check_security_patches.sh\",
+              \"sudo chmod 644 $RESULT_FILE\"  # Set file permissions
+            ]" \
             --query "Command.CommandId" \
             --output text)
 
