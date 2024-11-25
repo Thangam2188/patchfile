@@ -85,12 +85,12 @@ jobs:
             --output text)
           echo "$FILE_CONTENTS" > ./security_patches.txt
 
- - name: Commit and Push Patch Output
+      - name: Commit and Push Patch Output
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add patch_output.txt
+          git add security_patches.txt
           git commit -m "Add patch output from security check"
           git push origin HEAD:main
