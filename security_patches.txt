@@ -1,0 +1,15 @@
+RHSA-2024:3741 Important/Sec. bind-export-libs-32:9.11.4-26.P2.el7_9.16.x86_64
+RHSA-2024:3741 Important/Sec. bind-libs-32:9.11.4-26.P2.el7_9.16.x86_64
+RHSA-2024:3741 Important/Sec. bind-libs-lite-32:9.11.4-26.P2.el7_9.16.x86_64
+RHSA-2024:3741 Important/Sec. bind-license-32:9.11.4-26.P2.el7_9.16.noarch
+RHSA-2024:3741 Important/Sec. bind-utils-32:9.11.4-26.P2.el7_9.16.x86_64
+RHSA-2024:3741 Important/Sec. dhclient-12:4.2.5-83.el7_9.2.x86_64
+RHSA-2024:3741 Important/Sec. dhcp-common-12:4.2.5-83.el7_9.2.x86_64
+RHSA-2024:3741 Important/Sec. dhcp-libs-12:4.2.5-83.el7_9.2.x86_64
+RHSA-2024:3588 Important/Sec. glibc-2.17-326.el7_9.3.x86_64
+RHSA-2024:3588 Important/Sec. glibc-common-2.17-326.el7_9.3.x86_64
+RHSA-2024:3588 Important/Sec. glibc-devel-2.17-326.el7_9.3.x86_64
+RHSA-2024:3588 Important/Sec. glibc-headers-2.17-326.el7_9.3.x86_64
+RHSA-2024:3939 Important/Sec. iwl7260-firmware-25.30.13.0-83.el7_9.noarch
+RHSA-2024:3669 Important/Sec. less-458-10.el7_9.x86_64
+RHSA-2024:3939 Important/Sec. linux-firmware-20200421-83.git78c0348.el7_9.noarch
