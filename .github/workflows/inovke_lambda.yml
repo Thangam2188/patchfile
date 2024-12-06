@@ -53,11 +53,14 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
+          AWS_DEFAULT_REGION: "us-east-1"
         run: |
           echo "Invoking Lambda function InstallSecurityPatches..."
           aws lambda invoke \
               --function-name InstallSecurityPatches \
               --payload '{}' \
+              --region us-east-1 \
               response.json
           echo "Lambda response:"
           cat response.json
+
