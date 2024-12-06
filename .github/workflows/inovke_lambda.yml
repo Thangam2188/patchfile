@@ -1,0 +1,33 @@
+name: Trigger Lambda for Security Patches
+
+on:
+  workflow_dispatch:  # Allows manual triggering of the workflow.
+
+jobs:
+  invoke-lambda:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up AWS CLI
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Invoke Lambda Function
+      run: |
+        echo "Invoking Lambda function InstallSecurityPatches..."
+        aws lambda invoke \
+          --function-name InstallSecurityPatches \
+          --payload '{}' \
+          --cli-binary-format raw-in-base64-out \
+          output.json
+
+    - name: Show Lambda Invocation Output
+      run: |
+        echo "Lambda response:"
+        cat output.json
