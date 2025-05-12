@@ -53,7 +53,7 @@ jobs:
         env:
           AWS_PROFILE: temp-mfa
         run: |
-          INSTANCE_ID="i-008e8f3c90e3bee1a"
+          INSTANCE_ID=$(cat instance.txt)
           RESULT_FILE="/usr/bin/security_patches.txt"
 
           echo "Running patch check script on EC2..."
