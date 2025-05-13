@@ -1,9 +1,9 @@
 name: Run Security Patches Check and Commit Output
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    - cron: '0 0 * * 1' # Run every Monday at midnight UTC
+    - cron: '0 0 * * 1'  # Run every Monday at midnight UTC
 
 jobs:
   run_patches_script:
