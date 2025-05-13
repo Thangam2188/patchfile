@@ -31,11 +31,9 @@ jobs:
           MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT1"
           AWS_DEFAULT_REGION: "us-east-1"
         run: |
-          # Generate the MFA code using oathtool
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
 
-          # Attempt to get temporary credentials
           TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json)
           echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
@@ -53,14 +51,33 @@ jobs:
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-      - name: Run Security Patch Script via SSM
+      - name: Upload and Execute Patch Script on EC2
+        env:
+          AWS_PROFILE: temp-mfa
+        run: |
+          INSTANCE_ID=$(cat instance.txt)
+
+          echo "Uploading and installing patch script on EC2..."
+          SCRIPT_CONTENT=$(cat check_security_patches.sh | base64 | tr -d '\n')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --comment "Install patch script" \
+            --parameters commands="echo $SCRIPT_CONTENT | base64 -d > /tmp/check_security_patches.sh && sudo mv /tmp/check_security_patches.sh /usr/bin/check_security_patches.sh && sudo chmod +x /usr/bin/check_security_patches.sh" \
+            --query "Command.CommandId" \
+            --output text)
+
+          aws ssm wait command-executed --command-id $COMMAND_ID --instance-id $INSTANCE_ID
+          echo "Patch script uploaded and installed."
+
+      - name: Run Patch Check Script on EC2
         env:
           AWS_PROFILE: temp-mfa
         run: |
           INSTANCE_ID=$(cat instance.txt)
           RESULT_FILE="/usr/bin/security_patches.txt"
 
-          echo "Running patch check script on EC2..."
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
@@ -71,10 +88,8 @@ jobs:
             --query "Command.CommandId" \
             --output text)
 
-          echo "Waiting for command to complete..."
           aws ssm wait command-executed --command-id $COMMAND_ID --instance-id $INSTANCE_ID
 
-          echo "Fetching result file..."
           FILE_CONTENTS_COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
