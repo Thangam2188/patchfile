@@ -28,18 +28,16 @@ jobs:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT1"
-          AWS_DEFAULT_REGION: "us-east-1"
+          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
-
           TEMP_CREDS=$(aws sts get-session-token \
             --serial-number $MFA_SERIAL_ARN \
             --token-code $MFA_CODE \
             --duration-seconds 3600 \
             --output json)
-
           echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
@@ -49,24 +47,21 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
-          AWS_DEFAULT_REGION: "us-east-1"
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-      - name: Run Security Patch Script on Multiple EC2 Instances via SSM
+      - name: Run Security Patch Script on EC2 Instances
         env:
           AWS_PROFILE: temp-mfa
         run: |
-          OUTPUT_FILE=instance_patches.txt
-          : > $OUTPUT_FILE
-
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "Processing Instance: $INSTANCE_ID"
 
-            echo "Running patch script on instance with sudo..."
+            echo "Executing patch script..."
             COMMAND_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
@@ -74,16 +69,17 @@ jobs:
               --query "Command.CommandId" \
               --output text)
 
-            echo "Waiting for script execution to complete..."
+            echo "Waiting for script to complete..."
             aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
 
-            echo "Fetching output from instance..."
+            echo "Fetching output..."
             FILE_COMMAND_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
-              --parameters 'commands=["sudo cat /usr/bin/instance_patches.txt"]' \
+              --parameters 'commands=["sudo cat /usr/bin/security_patches.txt"]' \
               --query "Command.CommandId" \
               --output text)
+
             aws ssm wait command-executed --command-id "$FILE_COMMAND_ID" --instance-id "$INSTANCE_ID"
 
             PATCH_RESULT=$(aws ssm get-command-invocation \
@@ -92,10 +88,8 @@ jobs:
               --query "StandardOutputContent" \
               --output text)
 
-            echo -e "\nInstance: $INSTANCE_ID" >> $OUTPUT_FILE
-            echo "$PATCH_RESULT" >> $OUTPUT_FILE
-            echo "----------------------------------" >> $OUTPUT_FILE
-
+            echo "$PATCH_RESULT" > "${INSTANCE_ID}_patches.txt"
+            echo "Saved to ${INSTANCE_ID}_patches.txt"
           done < instance.txt
 
       - name: Commit and Push Patch Output
@@ -105,6 +99,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git add instance_patches.txt
+          git pull --rebase origin main || true
+          git add *_patches.txt
           git commit -m "Patch results from EC2 instances" || echo "No changes to commit"
           git push origin HEAD:main
