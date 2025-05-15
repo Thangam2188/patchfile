@@ -1,28 +1,27 @@
----
 name: Run Security Patches Check and Commit Output
+
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: 0 0 * * 1
+    - cron: '0 0 * * 1' # Every Monday at midnight UTC
+
 jobs:
   run_patches_script:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+
       - name: Install dependencies
-        run: >
+        run: |
           sudo apt-get update
-
           sudo apt-get install -y oathtool jq unzip curl
-
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-
           unzip -o awscliv2.zip
-
           sudo ./aws/install --update
-
           aws --version
+
       - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
         env:
@@ -31,34 +30,33 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
           AWS_DEFAULT_REGION: us-east-1
-        run: >
+        run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
-
           echo "Generated MFA Code: $MFA_CODE"
 
-
-          TEMP_CREDS=$(aws sts get-session-token --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE --duration-seconds 3600 --output json)
+          TEMP_CREDS=$(aws sts get-session-token \
+            --serial-number $MFA_SERIAL_ARN \
+            --token-code $MFA_CODE \
+            --duration-seconds 3600 \
+            --output json)
 
           echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-
           echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-
           echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+
       - name: Configure AWS CLI with Temporary Credentials
         env:
           AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
           AWS_DEFAULT_REGION: us-east-1
-        run: >
+        run: |
           aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
-
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
-
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
-
           aws configure set region us-east-1 --profile temp-mfa
-            - name: Run Security Patch Script on Multiple EC2 Instances via SSM
+
+      - name: Run Security Patch Script on Multiple EC2 Instances via SSM
         env:
           AWS_PROFILE: temp-mfa
         run: |
@@ -123,4 +121,3 @@ jobs:
           git add security_patches.txt
           git commit -m "Security patch results from EC2 instances" || echo "No changes to commit"
           git push origin HEAD:main
-
