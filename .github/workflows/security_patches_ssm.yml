@@ -1,7 +1,7 @@
 name: Run Security Patches Check and Commit Output
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
     - cron: '0 0 * * 1'  # Every Monday at midnight UTC
 
@@ -28,8 +28,8 @@ jobs:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
-          AWS_DEFAULT_REGION: us-east-1
+          MFA_SERIAL_ARN: "arn:aws:iam::472598590798:mfa/TESTGIT1"
+          AWS_DEFAULT_REGION: "us-east-1"
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
@@ -49,14 +49,14 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
-          AWS_DEFAULT_REGION: us-east-1
+          AWS_DEFAULT_REGION: "us-east-1"
         run: |
           aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-      - name: Run Patch Script on Multiple EC2 Instances via SSM
+      - name: Run Security Patch Script on Multiple EC2 Instances via SSM
         env:
           AWS_PROFILE: temp-mfa
         run: |
@@ -66,26 +66,24 @@ jobs:
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "Processing Instance: $INSTANCE_ID"
 
-            # Run the patch script (assumed to already exist)
+            echo "Running patch script on instance with sudo..."
             COMMAND_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
-              --parameters 'commands=[
-                "sudo /usr/bin/check_security_patches.sh"
-              ]' \
+              --parameters 'commands=["sudo /usr/bin/check_security_patches.sh"]' \
               --query "Command.CommandId" \
               --output text)
 
+            echo "Waiting for script execution to complete..."
             aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
 
-            # Fetch the output file
+            echo "Fetching output from instance..."
             FILE_COMMAND_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
               --parameters 'commands=["sudo cat /usr/bin/instance_patches.txt"]' \
               --query "Command.CommandId" \
               --output text)
-
             aws ssm wait command-executed --command-id "$FILE_COMMAND_ID" --instance-id "$INSTANCE_ID"
 
             PATCH_RESULT=$(aws ssm get-command-invocation \
@@ -106,6 +104,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git add instance_patches.txt
           git commit -m "Patch results from EC2 instances" || echo "No changes to commit"
           git push origin HEAD:main
