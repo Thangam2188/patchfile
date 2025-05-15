@@ -58,19 +58,7 @@ jobs:
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "Processing Instance: $INSTANCE_ID"
 
-            echo "Uploading and creating script in sudo context..."
-            aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "AWS-RunShellScript" \
-              --comment "Create patch script" \
-              --parameters 'commands=[
-                "sudo bash -c '\''cat <<EOF > /usr/bin/check_security_patches.sh\n#!/bin/bash\nOUTPUT_FILE=/usr/bin/security_patches.txt\nsudo touch $OUTPUT_FILE\nsudo chmod 644 $OUTPUT_FILE\nif command -v yum &>/dev/null; then\n  sudo yum --disablerepo=docker-ce-stable-debuginfo updateinfo list security all | grep -E \"Critical|Important\" > $OUTPUT_FILE\nelif command -v dnf &>/dev/null; then\n  sudo dnf --disablerepo=docker-ce-stable-debuginfo updateinfo list security all | grep -E \"Critical|Important\" > $OUTPUT_FILE\nelse\n  echo \"Error: yum or dnf not found\" > $OUTPUT_FILE\nfi\necho \"Security patch check completed\" >> $OUTPUT_FILE\nEOF'\''",
-                "sudo chmod +x /usr/bin/check_security_patches.sh"
-              ]' \
-              --query "Command.CommandId" \
-              --output text
-
-            echo "Running patch script in sudo context..."
+            echo "Running existing script on instance..."
             COMMAND_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
@@ -82,7 +70,7 @@ jobs:
               --command-id "$COMMAND_ID" \
               --instance-id "$INSTANCE_ID"
 
-            echo "Fetching output from $INSTANCE_ID..."
+            echo "Fetching patch output from instance..."
             FETCH_CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
@@ -103,7 +91,6 @@ jobs:
             echo -e "\nInstance: $INSTANCE_ID" >> $OUTPUT_FILE
             echo "$PATCH_OUTPUT" >> $OUTPUT_FILE
             echo "----------------------------------------" >> $OUTPUT_FILE
-
           done < instance.txt
 
       - name: Commit and Push Patch Output
