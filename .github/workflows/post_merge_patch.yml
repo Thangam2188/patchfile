@@ -1,0 +1,50 @@
+name: Post-Merge Patch Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - instance_patches.txt
+
+jobs:
+  deploy_patch_script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install AWS CLI and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip curl jq
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -o awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Copy instance_patches.txt to EC2
+        run: |
+          while IFS= read -r INSTANCE_ID; do
+            echo "Uploading patch file to $INSTANCE_ID"
+            aws ssm send-command \
+              --document-name "AWS-RunShellScript" \
+              --instance-ids "$INSTANCE_ID" \
+              --comment "Copy patch file" \
+              --parameters 'commands=[
+                "mkdir -p /usr/bin/patchscript/",
+                "rm -f /usr/bin/patchscript/instance_patches.txt",
+                "echo \"'"$(cat instance_patches.txt | sed 's/"/\\"/g')"'"\" > /usr/bin/patchscript/instance_patches.txt"
+              ]' \
+              --region us-east-1 \
+              --output text
+          done < instance.txt
+
+      - name: Invoke Lambda to Install Patches
+        run: |
+          aws lambda invoke \
+            --function-name installSecurityPatches \
+            --region us-east-1 \
+            output.json
+
+          cat output.json
