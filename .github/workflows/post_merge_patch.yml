@@ -1,25 +1,29 @@
-name: Invoke Patch Installation via Lambda After PR Merge
+name: Install Patches via Lambda After PR Approval
 
 on:
   push:
     branches:
-      - main  # Run only when a PR is merged into main
+      - main
+    paths:
+      - instance_patches.txt
 
 jobs:
-  invoke_lambda_install:
+  trigger_patch_lambda:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq unzip curl
+
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip -o awscliv2.zip
           sudo ./aws/install --update
+
           aws --version
 
       - name: Generate MFA Code and Get Temporary AWS Credentials
@@ -29,13 +33,14 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
 
           TEMP_CREDS=$(aws sts get-session-token \
-            --serial-number "$MFA_SERIAL_ARN" \
-            --token-code "$MFA_CODE" \
+            --serial-number $MFA_SERIAL_ARN \
+            --token-code $MFA_CODE \
             --duration-seconds 3600 \
             --output json)
 
@@ -44,19 +49,35 @@ jobs:
           echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
       - name: Configure AWS CLI with Temporary Credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
+          AWS_DEFAULT_REGION: us-east-1
         run: |
-          mkdir -p ~/.aws
-          echo "[temp-mfa]" > ~/.aws/credentials
-          echo "aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
-          echo "aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
-          echo "aws_session_token=${{ env.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
+          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
+
+      - name: Pull latest instance_patches.txt from main
+        run: |
+          git fetch origin main
+          git checkout origin/main -- instance_patches.txt
+
+      - name: Ensure instance_patches.txt exists
+        run: |
+          if [ ! -f instance_patches.txt ]; then
+            echo "❌ instance_patches.txt not found!"
+            exit 1
+          fi
 
       - name: Invoke Lambda to Install Security Patches
         env:
           AWS_PROFILE: temp-mfa
         run: |
           echo "Invoking Lambda function installSecurityPatches..."
+
           aws lambda invoke \
             --function-name installSecurityPatches \
             --payload file://instance_patches.txt \
@@ -64,14 +85,21 @@ jobs:
             patch_results.json \
             --profile temp-mfa
 
-          echo "Patch installation invoked. Contents of Lambda result:"
+          echo "✅ Patch installation invoked. Lambda result:"
           cat patch_results.json
 
-      - name: Commit and Push Patch Results
+      - name: Commit Patch Results
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          RESULT_FILE="patch_results_$TIMESTAMP.json"
+
+          cp patch_results.json $RESULT_FILE
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add patch_results.json
-          git commit -m "Patch install result from Lambda" || echo "No changes to commit"
-          git pull --rebase
+
+          git pull origin main
+          git add $RESULT_FILE
+          git commit -m "Add Lambda patch install results: $RESULT_FILE" || echo "No changes to commit"
           git push origin HEAD:main
