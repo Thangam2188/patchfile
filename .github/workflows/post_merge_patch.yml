@@ -1,5 +1,6 @@
 name: Post-Merge Patch Deploy
-
+on:
+  workflow_dispatch: {}
 on:
   push:
     branches:
