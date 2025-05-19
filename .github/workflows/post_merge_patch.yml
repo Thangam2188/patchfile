@@ -1,17 +1,10 @@
-name: Post-Merge Patch Deploy
+name: Run Security Patches via SSM (With MFA)
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - instance_patches.txt
-
-  # ✅ Add this to allow manual trigger from the GitHub UI
   workflow_dispatch:
 
 jobs:
-  deploy_patches:
+  run_patch_mfa:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,71 +20,71 @@ jobs:
           sudo ./aws/install --update
           aws --version
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: us-east-1
-
-      - name: Read EC2 instance ID
-        id: read_instance
+      - name: Generate MFA Code & Get Temporary Credentials
+        id: mfa_creds
+        env:
+          MFA_SECRET: ${{ secrets.MFA_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          MFA_SERIAL_ARN: ${{ secrets.MFA_SERIAL_ARN }}
         run: |
-          INSTANCE_ID=$(head -n 1 instance.txt)
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
+          echo "Generated MFA Code: $MFA_CODE"
 
-      - name: Upload patch file to EC2
+          TEMP_CREDS=$(aws sts get-session-token \
+            --serial-number $MFA_SERIAL_ARN \
+            --token-code $MFA_CODE \
+            --duration-seconds 3600 \
+            --output json)
+
+          echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+
+      - name: Configure AWS CLI with Temp Credentials
         run: |
-          echo "Copying instance_patches.txt to EC2 instance..."
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+          echo "aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+          echo "aws_session_token=${{ env.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+          aws sts get-caller-identity
+
+      - name: Run patch script via SSM on EC2
+        run: |
+          INSTANCE_ID=$(cat instance.txt)
+          echo "Running patch check on $INSTANCE_ID..."
+
+          COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --comment "Upload patch list" \
-            --parameters 'commands=[
-              "mkdir -p /usr/bin/patchscript",
-              "cat <<EOF > /usr/bin/patchscript/instance_patches.txt",
-              "'"$(cat instance_patches.txt | sed 's/"/\\"/g')"'",
-              "EOF"
-            ]' \
-            --query "Command.CommandId" \
-            --output text
-
-      - name: Invoke Lambda to install patches
-        id: invoke_lambda
-        run: |
-          echo "Triggering Lambda: installSecurityPatches"
-          RESPONSE=$(aws lambda invoke \
-            --function-name installSecurityPatches \
-            --payload '{"instance_id": "'"$INSTANCE_ID"'"}' \
-            response.json)
-          cat response.json
-          echo "Lambda invoked."
-
-      - name: Get patch result from EC2
-        run: |
-          echo "Fetching patch install results..."
-          PATCH_COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
+            --parameters 'commands=["sudo /usr/bin/check_security_patches.sh"]' \
+            --output text \
+            --query "Command.CommandId")
+
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+
+          RESULT_COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["cat /usr/bin/patchscript/patch_status.txt"]' \
-            --query "Command.CommandId" \
-            --output text)
+            --instance-ids "$INSTANCE_ID" \
+            --parameters 'commands=["cat /usr/bin/instance_patches.txt"]' \
+            --output text \
+            --query "Command.CommandId")
 
-          aws ssm wait command-executed --command-id "$PATCH_COMMAND_ID" --instance-id "$INSTANCE_ID"
+          aws ssm wait command-executed --command-id "$RESULT_COMMAND_ID" --instance-id "$INSTANCE_ID"
 
-          RESULT=$(aws ssm get-command-invocation \
-            --command-id "$PATCH_COMMAND_ID" \
+          OUTPUT=$(aws ssm get-command-invocation \
+            --command-id "$RESULT_COMMAND_ID" \
             --instance-id "$INSTANCE_ID" \
             --query "StandardOutputContent" \
             --output text)
 
-          echo "$RESULT" > patch_result.txt
+          echo "$OUTPUT" > instance_patches.txt
 
-      - name: Commit and Push patch result to GitHub
+      - name: Commit & push results to GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add patch_result.txt
-          git commit -m "Patch result uploaded after Lambda execution" || echo "No changes to commit"
+          git add instance_patches.txt
+          git commit -m "Add patch results from EC2 instance" || echo "No changes"
           git push origin HEAD:main
