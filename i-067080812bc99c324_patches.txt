@@ -1,5 +1,5 @@
 === Security Patches Report ===
-Generated at: Fri May 16 08:58:28 IST 2025
+Generated at: Mon May 19 06:28:56 IST 2025
 
 RHSA-2025:1681  Important/Sec. bind-libs-32:9.16.23-24.el9_5.3.x86_64
 RHSA-2025:1681  Important/Sec. bind-license-32:9.16.23-24.el9_5.3.noarch
