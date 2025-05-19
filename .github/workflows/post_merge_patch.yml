@@ -1,6 +1,5 @@
 name: Post-Merge Patch Deploy
-on:
-  workflow_dispatch: {}
+
 on:
   push:
     branches:
@@ -9,43 +8,51 @@ on:
       - instance_patches.txt
 
 jobs:
-  deploy_patch_script:
+  trigger_lambda:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
-      - name: Install AWS CLI and dependencies
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Copy instance_patches.txt to S3 (optional)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip curl jq
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip -o awscliv2.zip
-          sudo ./aws/install --update
+          aws s3 cp instance_patches.txt s3://your-patch-bucket/instance_patches.txt
 
-      - name: Copy instance_patches.txt to EC2
-        run: |
-          while IFS= read -r INSTANCE_ID; do
-            echo "Uploading patch file to $INSTANCE_ID"
-            aws ssm send-command \
-              --document-name "AWS-RunShellScript" \
-              --instance-ids "$INSTANCE_ID" \
-              --comment "Copy patch file" \
-              --parameters 'commands=[
-                "mkdir -p /usr/bin/patchscript/",
-                "rm -f /usr/bin/patchscript/instance_patches.txt",
-                "echo \"'"$(cat instance_patches.txt | sed 's/"/\\"/g')"'"\" > /usr/bin/patchscript/instance_patches.txt"
-              ]' \
-              --region us-east-1 \
-              --output text
-          done < instance.txt
-
-      - name: Invoke Lambda to Install Patches
+      - name: Invoke Lambda to run patch installation
         run: |
           aws lambda invoke \
             --function-name installSecurityPatches \
-            --region us-east-1 \
+            --payload file://instance_patches.txt \
             output.json
 
-          cat output.json
+      - name: Upload patch results to repo (optional)
+        run: |
+          PATCH_RESULT_FILE="patch_results.txt"
+          if [ -f "$PATCH_RESULT_FILE" ]; then
+            echo "Uploading patch result..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git checkout -b patch-status-update
+            cp "$PATCH_RESULT_FILE" .
+            git add patch_results.txt
+            git commit -m "Update patch results"
+            git push origin patch-status-update
+          fi
+
+      - name: Create PR to merge patch results
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: Update patch results
+          branch: patch-status-update
+          title: 'Patch Results Update'
+          body: 'This PR contains the output of the patch installation script.'
