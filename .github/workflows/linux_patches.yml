@@ -1,18 +1,15 @@
-name: Run Security Patch Script via SSM and Commit Output
+name: Run Patch Script on EC2 and Commit Output
 
 on:
   workflow_dispatch:
 
 jobs:
-  check_patches:
+  check_security_patches:
     runs-on: ubuntu-latest
-
-    env:
-      AWS_DEFAULT_REGION: us-east-1
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install dependencies
         run: |
@@ -23,32 +20,38 @@ jobs:
           sudo ./aws/install --update
           aws --version
 
-      - name: Generate MFA and Get Temporary AWS Credentials
-        id: creds
+      - name: Generate MFA Code and Get Temporary AWS Credentials
+        id: mfa_creds
         env:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
 
-          TEMP_CREDS=$(aws sts get-session-token \
+          CREDS=$(aws sts get-session-token \
             --serial-number $MFA_SERIAL_ARN \
             --token-code $MFA_CODE \
             --duration-seconds 3600 \
             --output json)
 
-          echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+
+      - name: Set AWS CLI temp profile
+        run: |
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
+          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
+          aws configure set region us-east-1 --profile temp-mfa
 
       - name: Run Security Patch Script on EC2 Instances
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
+          AWS_PROFILE: temp-mfa
         run: |
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "Processing Instance: $INSTANCE_ID"
@@ -57,7 +60,7 @@ jobs:
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
               --comment "Run patch script" \
-              --parameters 'commands=["sudo /usr/bin/check_security_patches.sh"]' \
+              --parameters 'commands=["sudo bash /usr/bin/check_security_patches.sh"]' \
               --query "Command.CommandId" \
               --output text)
 
@@ -72,7 +75,6 @@ jobs:
               --output text)
 
             echo "$OUTPUT" > "${INSTANCE_ID}_patches.txt"
-
           done < instance.txt
 
       - name: Commit and Push Patch Output
@@ -83,5 +85,5 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git add *_patches.txt || echo "No patch files to add"
-          git commit -m "Patch results from EC2 instances" || echo "Nothing to commit"
-          git push origin HEAD:main || echo "Push failed, possibly due to lack of new changes"
+          git commit -m "Add patch results from EC2 instances" || echo "No changes to commit"
+          git push origin HEAD:main || echo "Nothing to push"
