@@ -1,23 +1,4 @@
-Skip to content
-Navigation Menu
-Thangam2188
-patchfile
 
-Type / to search
-Code
-Issues
-Pull requests
-Actions
-Projects
-Security
-Insights
-Settings
-Run Security Patches Check and Commit Output
-Run Security Patches Check and Commit Output #110
-Jobs
-Run details
-Workflow file for this run
-.github/workflows/security_patches_ssm.yml at 1042764
 name: Run Security Patches Check and Commit Output
 
 on:
