@@ -8,16 +8,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout Repository
         uses: actions/checkout@v2
 
-      - name: Setup tools
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq unzip curl
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip -o awscliv2.zip
           sudo ./aws/install --update
+          aws --version
 
       - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
@@ -28,6 +29,7 @@ jobs:
           MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
           AWS_DEFAULT_REGION: us-east-1
         run: |
+          set -e
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
           TEMP_CREDS=$(aws sts get-session-token \
@@ -44,18 +46,28 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
-          AWS_DEFAULT_REGION: us-east-1
         run: |
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
-          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
-          aws configure set region us-east-1 --profile temp-mfa
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id=${AWS_ACCESS_KEY_ID}" >> ~/.aws/credentials
+          echo "aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}" >> ~/.aws/credentials
+          echo "aws_session_token=${AWS_SESSION_TOKEN}" >> ~/.aws/credentials
+          echo "[default]" > ~/.aws/config
+          echo "region = us-east-1" >> ~/.aws/config
+          aws sts get-caller-identity
 
-      - name: Run patch install script and fetch output
+      - name: Run Patch Script and Fetch Logs
         run: |
+          set -e
+          if [[ ! -f "instance.txt" ]]; then
+            echo "❌ instance.txt not found. Aborting."
+            exit 1
+          fi
+
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "Invoking patch installer on $INSTANCE_ID"
+            echo "🔧 Running patch installer on $INSTANCE_ID"
 
+            # Execute patch installer
             CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
@@ -65,7 +77,7 @@ jobs:
 
             aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID"
 
-            echo "Fetching result from $INSTANCE_ID..."
+            # Fetch result
             FETCH_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
@@ -84,7 +96,7 @@ jobs:
             echo "$OUTPUT" > "${INSTANCE_ID}_patch_log.txt"
           done < instance.txt
 
-      - name: Push patch logs to GitHub
+      - name: Commit and Push Patch Logs to GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -92,5 +104,5 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
           git add *_patch_log.txt
-          git commit -m "Patch install logs from EC2" || echo "No changes"
+          git commit -m "Patch install logs from EC2" || echo "No changes to commit"
           git push origin HEAD:main
