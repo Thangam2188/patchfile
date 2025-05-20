@@ -1,17 +1,17 @@
-name: Upload Patch Script and Patch List
+name: Upload Patch Files and Install Script to EC2
 
 on:
   workflow_dispatch:
 
 jobs:
-  upload_script:
+  upload_patch_script:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v2
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq unzip curl
@@ -41,33 +41,29 @@ jobs:
           echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
       - name: Configure AWS CLI with Temporary Credentials
-        env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
-          AWS_DEFAULT_REGION: us-east-1
         run: |
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
-          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
-          aws configure set region us-east-1 --profile temp-mfa
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+          echo "aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+          echo "aws_session_token=${{ env.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+          echo "[default]" > ~/.aws/config
+          echo "region = us-east-1" >> ~/.aws/config
 
-
-      - name: Upload Patch File and Script to EC2 Instances
+      - name: Upload Patch Files and Script to EC2
         run: |
           for INSTANCE_ID in $(cat instance.txt); do
             echo "Uploading to instance: $INSTANCE_ID"
-
             PATCH_FILE="${INSTANCE_ID}_patches.txt"
-            SCRIPT_FILE="install_security_patches.py"
 
             if [[ ! -f "$PATCH_FILE" ]]; then
-              echo "Patch file $PATCH_FILE not found. Skipping."
+              echo "❌ Patch file $PATCH_FILE not found. Skipping..."
               continue
             fi
 
             echo "Uploading patch list..."
             aws ssm send-command \
+              --region us-east-1 \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
               --comment "Create patch list" \
@@ -82,6 +78,7 @@ jobs:
 
             echo "Uploading install script..."
             aws ssm send-command \
+              --region us-east-1 \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
               --comment "Upload install script" \
