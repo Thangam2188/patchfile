@@ -1,25 +1,26 @@
-name: Upload Patch Script and Report to EC2
+name: Upload Patch Script and Patch List
 
 on:
   workflow_dispatch:
 
 jobs:
-  upload:
+  upload_script:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Install tools
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq unzip curl
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip -o awscliv2.zip
           sudo ./aws/install --update
+          aws --version
 
-      - name: Generate MFA session
+      - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
         env:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
@@ -28,46 +29,66 @@ jobs:
           MFA_SERIAL_ARN: ${{ secrets.MFA_SERIAL_ARN }}
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
+          echo "Generated MFA Code: $MFA_CODE"
+
           CREDS=$(aws sts get-session-token \
             --serial-number $MFA_SERIAL_ARN \
             --token-code $MFA_CODE \
             --duration-seconds 3600 \
             --output json)
+
           echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
-      - name: Configure AWS CLI
+      - name: Configure AWS CLI with Temporary Credentials
         run: |
           mkdir -p ~/.aws
           echo "[default]" > ~/.aws/credentials
           echo "aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
           echo "aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
           echo "aws_session_token=${{ env.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+          echo "[default]" > ~/.aws/config
+          echo "region = us-east-1" >> ~/.aws/config
 
-      - name: Upload patches and installer script
+      - name: Upload Patch File and Script to EC2 Instances
         run: |
-          PATCH_SCRIPT=$(cat install_security_patches.py | sed 's/"/\\"/g')
+          for INSTANCE_ID in $(cat instance.txt); do
+            echo "Uploading to instance: $INSTANCE_ID"
 
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "Uploading to $INSTANCE_ID"
+            PATCH_FILE="${INSTANCE_ID}_patches.txt"
+            SCRIPT_FILE="install_security_patches.py"
 
-            PATCH_CONTENT=$(cat ${INSTANCE_ID}_patches.txt | sed 's/"/\\"/g')
+            if [[ ! -f "$PATCH_FILE" ]]; then
+              echo "Patch file $PATCH_FILE not found. Skipping."
+              continue
+            fi
 
+            echo "Uploading patch list..."
             aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
-              --comment "Upload patch data and script" \
+              --comment "Create patch list" \
               --parameters "commands=[
-                \"sudo mkdir -p /usr/bin/patchscript\",
-                \"sudo bash -c 'cat > /usr/bin/patchscript/${INSTANCE_ID}_patches.txt' <<EOF
-$PATCH_CONTENT
-EOF\",
-                \"sudo bash -c 'cat > /usr/bin/patchscript/install_security_patches.py' <<EOF
-$PATCH_SCRIPT
-EOF\",
-                \"sudo chmod +x /usr/bin/patchscript/install_security_patches.py\"
+                'mkdir -p /usr/bin/patchscript',
+                'cat <<EOF > /usr/bin/patchscript/${PATCH_FILE}',
+                '$(sed 's/"/\\"/g' $PATCH_FILE)',
+                'EOF'
               ]" \
-              --region us-east-1 \
+              --query "Command.CommandId" \
               --output text
-          done < instance.txt
+
+            echo "Uploading install script..."
+            aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunShellScript" \
+              --comment "Upload install script" \
+              --parameters "commands=[
+                'cat <<EOF > /usr/bin/patchscript/install_security_patches.py',
+                '$(sed 's/"/\\"/g' install_security_patches.py)',
+                'EOF',
+                'chmod +x /usr/bin/patchscript/install_security_patches.py'
+              ]" \
+              --query "Command.CommandId" \
+              --output text
+          done
