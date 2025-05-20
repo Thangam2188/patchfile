@@ -1,7 +1,7 @@
 name: Run Security Patches via SSM (With MFA)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual trigger
 
 jobs:
   run_patch_mfa:
@@ -20,34 +20,36 @@ jobs:
           sudo ./aws/install --update
           aws --version
 
-      - name: Generate MFA Code & Get Temporary Credentials
+      - name: Generate MFA Code and Get Temporary AWS Credentials
         id: mfa_creds
         env:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: ${{ secrets.MFA_SERIAL_ARN }}
+          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
 
-          TEMP_CREDS=$(aws sts get-session-token \
-            --serial-number $MFA_SERIAL_ARN \
-            --token-code $MFA_CODE \
+          CREDS=$(aws sts get-session-token \
+            --serial-number "$MFA_SERIAL_ARN" \
+            --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
 
-          echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
-      - name: Configure AWS CLI with Temp Credentials
+      - name: Configure AWS CLI with Temporary Credentials
         run: |
           mkdir -p ~/.aws
           echo "[default]" > ~/.aws/credentials
           echo "aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
           echo "aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
           echo "aws_session_token=${{ env.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+          echo "[default]" > ~/.aws/config
+          echo "region = us-east-1" >> ~/.aws/config
           aws sts get-caller-identity
 
       - name: Run Security Patch Script on EC2 Instances via SSM
@@ -85,10 +87,10 @@ jobs:
             echo "$PATCH_RESULT" > "${INSTANCE_ID}_patches.txt"
           done < instance.txt
 
-      - name: Commit & push results to GitHub
+      - name: Commit & Push Results to GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add *_patches.txt
-          git commit -m "Add patch results from EC2 instances" || echo "No changes"
+          git commit -m "Add patch results from EC2 instance(s)" || echo "No changes"
           git push origin HEAD:main
