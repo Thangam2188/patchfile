@@ -70,30 +70,29 @@ jobs:
               --output text)
 
             echo "Waiting for script to complete..."
-            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || {
+              echo "❌ Patch script failed for $INSTANCE_ID"
+              echo "Fetching logs..."
+
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$INSTANCE_ID" \
+                --query "StandardErrorContent" \
+                --output text || echo "No stderr output"
+              
+              exit 1
+            }
 
             echo "Fetching output..."
-            OUTPUT=$(aws ssm get-command-invocation \
+            PATCH_RESULT=$(aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "$INSTANCE_ID" \
               --query "StandardOutputContent" \
               --output text)
 
-            STDERR_OUTPUT=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query "StandardErrorContent" \
-              --output text)
-
-            echo "STDOUT for $INSTANCE_ID:"
-            echo "$OUTPUT"
-            echo "STDERR for $INSTANCE_ID:"
-            echo "$STDERR_OUTPUT"
-
-            echo "$OUTPUT" > "${INSTANCE_ID}_patches.txt"
-            echo "$STDERR_OUTPUT" >> "${INSTANCE_ID}_patches.txt"
-
+            echo "$PATCH_RESULT" > "${INSTANCE_ID}_patches.txt"
           done < instance.txt
+
 
       - name: Commit and Push Patch Output
         env:
