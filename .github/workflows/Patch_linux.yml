@@ -101,7 +101,13 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+
+          # Pull latest changes to avoid non-fast-forward errors
           git pull --rebase origin main || true
+
+          # Add and commit results
           git add *_patches.txt
           git commit -m "Patch results from EC2 instances" || echo "No changes to commit"
+
+          # Push back to main
           git push origin HEAD:main
