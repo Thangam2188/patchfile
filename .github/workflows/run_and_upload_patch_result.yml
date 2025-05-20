@@ -1,17 +1,17 @@
-name: Run Patches and Upload Results
+name: Upload and Run Patch Installer
 
 on:
   workflow_dispatch:
 
 jobs:
-  run_patches:
+  patch_and_upload:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repo
         uses: actions/checkout@v2
 
-      - name: Install Dependencies
+      - name: Setup AWS CLI and tools
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq unzip curl
@@ -20,54 +20,74 @@ jobs:
           sudo ./aws/install --update
           aws --version
 
-      - name: Generate MFA Code and Get Temporary AWS Credentials
+      - name: Generate MFA & Get Temporary AWS Credentials
         id: mfa_creds
         env:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
-          AWS_DEFAULT_REGION: us-east-1
         run: |
-          set -e
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           echo "Generated MFA Code: $MFA_CODE"
-          TEMP_CREDS=$(aws sts get-session-token \
+
+          CREDS=$(aws sts get-session-token \
             --serial-number $MFA_SERIAL_ARN \
             --token-code $MFA_CODE \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
-      - name: Configure AWS CLI with Temporary Credentials
+          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+
+      - name: Configure AWS CLI
+        run: |
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
+          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
+          aws configure set region us-east-1 --profile temp-mfa
+
+      - name: Upload patch files and Python script to EC2
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
+          AWS_PROFILE: temp-mfa
         run: |
-          mkdir -p ~/.aws
-          echo "[default]" > ~/.aws/credentials
-          echo "aws_access_key_id=${AWS_ACCESS_KEY_ID}" >> ~/.aws/credentials
-          echo "aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}" >> ~/.aws/credentials
-          echo "aws_session_token=${AWS_SESSION_TOKEN}" >> ~/.aws/credentials
-          echo "[default]" > ~/.aws/config
-          echo "region = us-east-1" >> ~/.aws/config
-          aws sts get-caller-identity
+          for INSTANCE_ID in $(cat instance.txt); do
+            echo "Uploading to instance: $INSTANCE_ID"
 
-      - name: Run Patch Script and Fetch Logs
+            PATCH_FILE="${INSTANCE_ID}_patches.txt"
+            PYTHON_SCRIPT="install_security_patches.py"
+
+            if [[ ! -f "$PATCH_FILE" || ! -f "$PYTHON_SCRIPT" ]]; then
+              echo "Missing file: $PATCH_FILE or $PYTHON_SCRIPT"
+              exit 1
+            fi
+
+            echo "Copying files to /usr/bin/patchscript on instance..."
+            aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunShellScript" \
+              --parameters "commands=[
+                \"sudo mkdir -p /usr/bin/patchscript\",
+                \"sudo bash -c 'cat > /usr/bin/patchscript/${PATCH_FILE}' << 'EOF'\",
+                \"$(sed 's/"/\\"/g' "$PATCH_FILE")\",
+                \"EOF\",
+                \"sudo bash -c 'cat > /usr/bin/patchscript/install_security_patches.py' << 'EOF'\",
+                \"$(sed 's/"/\\"/g' install_security_patches.py)\",
+                \"EOF\",
+                \"sudo chmod +x /usr/bin/patchscript/install_security_patches.py\"
+              ]" \
+              --output text \
+              --region us-east-1
+          done
+
+      - name: Execute patch installer and fetch logs
+        env:
+          AWS_PROFILE: temp-mfa
         run: |
-          set -e
-          if [[ ! -f "instance.txt" ]]; then
-            echo "❌ instance.txt not found. Aborting."
-            exit 1
-          fi
-
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+          for INSTANCE_ID in $(cat instance.txt); do
             echo "🔧 Running patch installer on $INSTANCE_ID"
 
-            # Execute patch installer
             CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
@@ -75,28 +95,23 @@ jobs:
               --query "Command.CommandId" \
               --output text)
 
-            aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID"
+            echo "⏳ Waiting for command to complete..."
+            if ! aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID"; then
+              echo "❌ Patch script failed for $INSTANCE_ID"
+            fi
 
-            # Fetch result
-            FETCH_ID=$(aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "AWS-RunShellScript" \
-              --parameters 'commands=["sudo cat /usr/bin/patchscript/patch_install_log.txt"]' \
-              --query "Command.CommandId" \
-              --output text)
-
-            aws ssm wait command-executed --command-id "$FETCH_ID" --instance-id "$INSTANCE_ID"
-
-            OUTPUT=$(aws ssm get-command-invocation \
-              --command-id "$FETCH_ID" \
+            echo "📄 Fetching logs..."
+            INVOCATION=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
               --instance-id "$INSTANCE_ID" \
-              --query "StandardOutputContent" \
-              --output text)
+              --output json)
 
-            echo "$OUTPUT" > "${INSTANCE_ID}_patch_log.txt"
-          done < instance.txt
+            echo "$INVOCATION" | jq -r '.StandardOutputContent' > "${INSTANCE_ID}_patch_log.txt"
+            echo "⚠️ STDERR:"
+            echo "$INVOCATION" | jq -r '.StandardErrorContent'
+          done
 
-      - name: Commit and Push Patch Logs to GitHub
+      - name: Commit patch logs to GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -104,5 +119,5 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
           git add *_patch_log.txt
-          git commit -m "Patch install logs from EC2" || echo "No changes to commit"
+          git commit -m "Patch install logs from EC2" || echo "No changes"
           git push origin HEAD:main
