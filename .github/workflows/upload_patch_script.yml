@@ -41,14 +41,17 @@ jobs:
           echo "AWS_SESSION_TOKEN=$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
       - name: Configure AWS CLI with Temporary Credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
+          AWS_DEFAULT_REGION: us-east-1
         run: |
-          mkdir -p ~/.aws
-          echo "[default]" > ~/.aws/credentials
-          echo "aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
-          echo "aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
-          echo "aws_session_token=${{ env.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
-          echo "[default]" > ~/.aws/config
-          echo "region = us-east-1" >> ~/.aws/config
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp-mfa
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
+          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
+          aws configure set region us-east-1 --profile temp-mfa
+
 
       - name: Upload Patch Files and Script to EC2
         run: |
