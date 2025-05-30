@@ -4,6 +4,7 @@ import subprocess
 import sys
 import os
 from datetime import datetime
+from collections import defaultdict
 
 def log(message):
     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
@@ -11,7 +12,7 @@ def log(message):
         f.write(f"{timestamp} {message}\n")
     print(f"{timestamp} {message}")
 
-# Validate arguments
+# Argument check
 if len(sys.argv) != 2:
     print("Usage: install_security_patches.py <instance-id>")
     sys.exit(1)
@@ -28,30 +29,35 @@ if not os.path.exists(PATCH_FILE):
     log(f"[WARN] Patch file not found: {PATCH_FILE}")
     sys.exit(0)
 
-# Extract valid package names
-valid_packages = []
+# Parse and deduplicate package versions by name
+package_map = defaultdict(list)
+
 with open(PATCH_FILE, "r") as f:
     for line in f:
         line = line.strip()
         if not line or line.startswith("=") or line.split()[0].isdigit():
-            continue  # Skip header or malformed lines
+            continue
         parts = line.split()
         if len(parts) > 2:
             pkg = parts[-1]
-            if "-" in pkg:  # crude filter to only include real packages
-                valid_packages.append(pkg)
+            if "-" in pkg:
+                pkg_name = pkg.split("-")[0]
+                package_map[pkg_name].append(pkg)
 
-if not valid_packages:
+# Pick the latest version for each package name (assumes sorted order)
+selected_packages = [versions[-1] for versions in package_map.values()]
+
+if not selected_packages:
     log("[INFO] No valid packages found to install.")
     sys.exit(0)
 
 log("[INFO] Installing packages:")
-for pkg in valid_packages:
+for pkg in selected_packages:
     log(f"- {pkg}")
 
 try:
     result = subprocess.run(
-        ["dnf", "--disablerepo=docker-ce-stable-debuginfo", "install", "-y"] + valid_packages,
+        ["dnf", "--disablerepo=docker-ce-stable-debuginfo", "install", "-y", "--skip-broken", "--allowerasing"] + selected_packages,
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
