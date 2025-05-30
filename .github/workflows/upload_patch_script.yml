@@ -51,19 +51,22 @@ jobs:
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-      - name: Upload Patch Files and Script to EC2
+      - name: Upload Patch Files and Python Installer to EC2
         run: |
           for INSTANCE_ID in $(cat instance.txt); do
             echo "📦 Uploading to instance: $INSTANCE_ID"
             PATCH_FILE="${INSTANCE_ID}_patches.txt"
+            PY_SCRIPT="install_security_patches.py"
 
-            if [[ ! -f "$PATCH_FILE" ]]; then
-              echo "❌ Patch file $PATCH_FILE not found. Skipping..."
+            if [[ ! -f "$PATCH_FILE" || ! -f "$PY_SCRIPT" ]]; then
+              echo "⚠️ Skipping $INSTANCE_ID — missing $PATCH_FILE or $PY_SCRIPT"
               continue
             fi
 
-            echo "📝 Uploading patch list..."
+            # Prepare patch file content
             PATCH_CONTENT=$(sed 's/["`$\\]/\\&/g' "$PATCH_FILE" | sed ':a;N;$!ba;s/\n/\\n/g')
+
+            echo "📝 Uploading patch file..."
             aws ssm send-command \
               --region us-east-1 \
               --instance-ids "$INSTANCE_ID" \
@@ -76,16 +79,18 @@ jobs:
               --query "Command.CommandId" \
               --output text
 
-            echo "🔧 Uploading install_security_patches.sh..."
-            SCRIPT_CONTENT=$(sed 's/["`$\\]/\\&/g' install_security_patches.sh | sed ':a;N;$!ba;s/\n/\\n/g')
+            # Prepare Python installer script
+            SCRIPT_CONTENT=$(sed 's/["`$\\]/\\&/g' "$PY_SCRIPT" | sed ':a;N;$!ba;s/\n/\\n/g')
+
+            echo "🐍 Uploading install_security_patches.py..."
             aws ssm send-command \
               --region us-east-1 \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
-              --comment "Upload install shell script" \
+              --comment "Upload Python patch installer" \
               --parameters "commands=[
-                'echo -e \"$SCRIPT_CONTENT\" > /usr/bin/patchscript/install_security_patches.sh',
-                'chmod +x /usr/bin/patchscript/install_security_patches.sh'
+                'echo -e \"$SCRIPT_CONTENT\" > /usr/bin/patchscript/install_security_patches.py',
+                'chmod +x /usr/bin/patchscript/install_security_patches.py'
               ]" \
               --query "Command.CommandId" \
               --output text
