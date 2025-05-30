@@ -47,7 +47,12 @@ for pkg in packages:
     log(f"- {pkg}")
 
 try:
-    result = subprocess.run(["dnf", "install", "-y"] + packages, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run(
+        ["dnf", "install", "-y"] + packages,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT
+    )
     log(result.stdout.decode())
     log("[SUCCESS] Installation completed successfully.")
 except subprocess.CalledProcessError as e:
