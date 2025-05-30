@@ -1,4 +1,3 @@
-cat << 'EOF' > /usr/bin/patchscript/install_security_patches.py
 #!/usr/bin/env python3
 
 import subprocess
@@ -48,16 +47,10 @@ for pkg in packages:
     log(f"- {pkg}")
 
 try:
-    result = subprocess.run(
-        ["dnf", "install", "-y"] + packages,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT
-    )
+    result = subprocess.run(["dnf", "install", "-y"] + packages, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     log(result.stdout.decode())
     log("[SUCCESS] Installation completed successfully.")
 except subprocess.CalledProcessError as e:
     log(f"[ERROR] Installation failed: {e}")
     log(e.stdout.decode() if e.stdout else "No additional error output.")
     sys.exit(1)
-EOF
