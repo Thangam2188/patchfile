@@ -30,7 +30,6 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
-          echo "Generated MFA Code: $MFA_CODE"
           TEMP_CREDS=$(aws sts get-session-token \
             --serial-number $MFA_SERIAL_ARN \
             --token-code $MFA_CODE \
@@ -52,11 +51,10 @@ jobs:
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-
       - name: Upload Patch Files and Script to EC2
         run: |
           for INSTANCE_ID in $(cat instance.txt); do
-            echo "Uploading to instance: $INSTANCE_ID"
+            echo "📦 Uploading to instance: $INSTANCE_ID"
             PATCH_FILE="${INSTANCE_ID}_patches.txt"
 
             if [[ ! -f "$PATCH_FILE" ]]; then
@@ -64,32 +62,30 @@ jobs:
               continue
             fi
 
-            echo "Uploading patch list..."
+            echo "📝 Uploading patch list..."
+            PATCH_CONTENT=$(sed 's/["`$\\]/\\&/g' "$PATCH_FILE" | sed ':a;N;$!ba;s/\n/\\n/g')
             aws ssm send-command \
               --region us-east-1 \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
-              --comment "Create patch list" \
+              --comment "Upload patch file" \
               --parameters "commands=[
                 'mkdir -p /usr/bin/patchscript',
-                'cat <<EOF > /usr/bin/patchscript/${PATCH_FILE}',
-                '$(sed 's/"/\\"/g' $PATCH_FILE)',
-                'EOF'
+                'echo -e \"$PATCH_CONTENT\" > /usr/bin/patchscript/${PATCH_FILE}'
               ]" \
               --query "Command.CommandId" \
               --output text
 
-            echo "Uploading install script..."
+            echo "🔧 Uploading install_security_patches.sh..."
+            SCRIPT_CONTENT=$(sed 's/["`$\\]/\\&/g' install_security_patches.sh | sed ':a;N;$!ba;s/\n/\\n/g')
             aws ssm send-command \
               --region us-east-1 \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
-              --comment "Upload install script" \
+              --comment "Upload install shell script" \
               --parameters "commands=[
-                'cat <<EOF > /usr/bin/patchscript/install_security_patches.py',
-                '$(sed 's/"/\\"/g' install_security_patches.py)',
-                'EOF',
-                'chmod +x /usr/bin/patchscript/install_security_patches.py'
+                'echo -e \"$SCRIPT_CONTENT\" > /usr/bin/patchscript/install_security_patches.sh',
+                'chmod +x /usr/bin/patchscript/install_security_patches.sh'
               ]" \
               --query "Command.CommandId" \
               --output text
