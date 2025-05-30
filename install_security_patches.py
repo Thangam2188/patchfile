@@ -1,3 +1,4 @@
+cat << 'EOF' > /usr/bin/patchscript/install_security_patches.py
 #!/usr/bin/env python3
 
 import subprocess
@@ -27,24 +28,19 @@ if not os.path.exists(PATCH_FILE):
     log(f"[WARN] Patch file not found: {PATCH_FILE}")
     sys.exit(0)
 
-# Read lines from the patch file
+# Parse patch list (raw dnf output with RHSA lines)
 with open(PATCH_FILE, "r") as f:
     lines = f.readlines()
 
 packages = []
-found_updates = False
-
 for line in lines:
-    if "Available" in line and "security updates" in line:
-        found_updates = True
-        continue
-    if found_updates:
-        parts = line.strip().split()
-        if parts:
-            packages.append(parts[0])
+    parts = line.strip().split()
+    if len(parts) > 2:
+        pkg = parts[-1]
+        packages.append(pkg)
 
 if not packages:
-    log("[INFO] No packages to install.")
+    log("[INFO] No packages found to install.")
     sys.exit(0)
 
 log("[INFO] Installing packages:")
@@ -64,3 +60,4 @@ except subprocess.CalledProcessError as e:
     log(f"[ERROR] Installation failed: {e}")
     log(e.stdout.decode() if e.stdout else "No additional error output.")
     sys.exit(1)
+EOF
