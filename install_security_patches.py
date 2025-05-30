@@ -11,7 +11,7 @@ def log(message):
         f.write(f"{timestamp} {message}\n")
     print(f"{timestamp} {message}")
 
-# Accept instance ID as an argument
+# Validate arguments
 if len(sys.argv) != 2:
     print("Usage: install_security_patches.py <instance-id>")
     sys.exit(1)
@@ -28,28 +28,30 @@ if not os.path.exists(PATCH_FILE):
     log(f"[WARN] Patch file not found: {PATCH_FILE}")
     sys.exit(0)
 
-# Read and parse packages
+# Extract valid package names
+valid_packages = []
 with open(PATCH_FILE, "r") as f:
-    lines = f.readlines()
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith("=") or line.split()[0].isdigit():
+            continue  # Skip header or malformed lines
+        parts = line.split()
+        if len(parts) > 2:
+            pkg = parts[-1]
+            if "-" in pkg:  # crude filter to only include real packages
+                valid_packages.append(pkg)
 
-packages = []
-for line in lines:
-    parts = line.strip().split()
-    if len(parts) > 2:
-        pkg = parts[-1]
-        packages.append(pkg)
-
-if not packages:
-    log("[INFO] No packages found to install.")
+if not valid_packages:
+    log("[INFO] No valid packages found to install.")
     sys.exit(0)
 
 log("[INFO] Installing packages:")
-for pkg in packages:
+for pkg in valid_packages:
     log(f"- {pkg}")
 
 try:
     result = subprocess.run(
-        ["dnf", "--disablerepo=docker-ce-stable-debuginfo", "install", "-y"] + packages,
+        ["dnf", "--disablerepo=docker-ce-stable-debuginfo", "install", "-y"] + valid_packages,
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
