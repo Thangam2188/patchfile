@@ -48,34 +48,32 @@ jobs:
           aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp-mfa
           aws configure set region us-east-1 --profile temp-mfa
 
-      - name: Upload patch files and Python script to EC2
+      - name: Upload patch files and install script to EC2
         env:
           AWS_PROFILE: temp-mfa
         run: |
           for INSTANCE_ID in $(cat instance.txt); do
-            echo "Uploading to instance: $INSTANCE_ID"
+            echo "📦 Uploading to instance: $INSTANCE_ID"
 
             PATCH_FILE="${INSTANCE_ID}_patches.txt"
-            PYTHON_SCRIPT="install_security_patches.py"
+            SHELL_SCRIPT="install_security_patches.sh"
 
-            if [[ ! -f "$PATCH_FILE" || ! -f "$PYTHON_SCRIPT" ]]; then
-              echo "Missing file: $PATCH_FILE or $PYTHON_SCRIPT"
+            if [[ ! -f "$PATCH_FILE" || ! -f "$SHELL_SCRIPT" ]]; then
+              echo "❌ Missing file: $PATCH_FILE or $SHELL_SCRIPT"
               exit 1
             fi
 
-            echo "Copying files to /usr/bin/patchscript on instance..."
+            PATCH_ESCAPED=$(sed 's/["`$\\]/\\&/g' "$PATCH_FILE" | sed ':a;N;$!ba;s/\n/\\n/g')
+            SCRIPT_ESCAPED=$(sed 's/["`$\\]/\\&/g' "$SHELL_SCRIPT" | sed ':a;N;$!ba;s/\n/\\n/g')
+
             aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
               --parameters "commands=[
                 \"sudo mkdir -p /usr/bin/patchscript\",
-                \"sudo bash -c 'cat > /usr/bin/patchscript/${PATCH_FILE}' << 'EOF'\",
-                \"$(sed 's/"/\\"/g' "$PATCH_FILE")\",
-                \"EOF\",
-                \"sudo bash -c 'cat > /usr/bin/patchscript/install_security_patches.py' << 'EOF'\",
-                \"$(sed 's/"/\\"/g' install_security_patches.py)\",
-                \"EOF\",
-                \"sudo chmod +x /usr/bin/patchscript/install_security_patches.py\"
+                \"echo -e \\\"$PATCH_ESCAPED\\\" > /usr/bin/patchscript/${PATCH_FILE}\",
+                \"echo -e \\\"$SCRIPT_ESCAPED\\\" > /usr/bin/patchscript/install_security_patches.sh\",
+                \"chmod +x /usr/bin/patchscript/install_security_patches.sh\"
               ]" \
               --output text \
               --region us-east-1
@@ -91,7 +89,7 @@ jobs:
             CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunShellScript" \
-              --parameters 'commands=["sudo python3 /usr/bin/patchscript/install_security_patches.py"]' \
+              --parameters "commands=[\"/usr/bin/patchscript/install_security_patches.sh $INSTANCE_ID\"]" \
               --query "Command.CommandId" \
               --output text)
 
