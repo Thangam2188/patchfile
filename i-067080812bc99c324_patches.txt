@@ -1,5 +1,5 @@
 === Security Patches Report ===
-Generated at: Mon May 26 11:45:20 IST 2025
+Generated at: Fri May 30 12:18:03 IST 2025
 
 Using dnf...
 RHSA-2025:1681  Important/Sec. bind-libs-32:9.16.23-24.el9_5.3.x86_64
@@ -116,6 +116,7 @@ RHSA-2025:7903  Important/Sec. kernel-tools-libs-5.14.0-570.17.1.el9_6.x86_64
 RHSA-2024:9474  Important/Sec. krb5-libs-1.21.1-4.el9_5.x86_64
 RHSA-2024:4636  Important/Sec. libndp-1.8-6.el9_4.x86_64
 RHSA-2025:7436  Important/Sec. libsoup-2.72.0-10.el9_6.1.x86_64
+RHSA-2025:8126  Important/Sec. libsoup-2.72.0-10.el9_6.2.x86_64
 RHSA-2024:9559  Important/Sec. libsoup-2.72.0-8.el9_5.2.x86_64
 RHSA-2025:0791  Important/Sec. libsoup-2.72.0-8.el9_5.3.x86_64
 RHSA-2025:1350  Important/Sec. libxml2-2.9.13-6.el9_5.1.x86_64
