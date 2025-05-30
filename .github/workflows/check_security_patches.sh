@@ -1,23 +1,26 @@
 #!/bin/bash
 
-OUTPUT_FILE="/usr/bin/instance_patches.txt"
-sudo touch "$OUTPUT_FILE"
-sudo chmod 644 "$OUTPUT_FILE"
+INSTANCE_ID="$1"
+PATCH_DIR="/usr/bin/patchscript"
+OUTPUT_FILE="${PATCH_DIR}/${INSTANCE_ID}_patches.txt"
 
-echo "=== Security Patches Report ===" > "$OUTPUT_FILE"
-echo "Generated at: $(date)" >> "$OUTPUT_FILE"
-echo "" >> "$OUTPUT_FILE"
+mkdir -p "$PATCH_DIR"
 
-if command -v dnf &> /dev/null; then
-    echo "Using dnf..." >> "$OUTPUT_FILE"
-    sudo dnf --disablerepo=docker-ce-stable-debuginfo updateinfo list security all | grep -E 'Critical|Important' >> "$OUTPUT_FILE"
-elif command -v yum &> /dev/null; then
-    echo "Using yum..." >> "$OUTPUT_FILE"
-    sudo yum --disablerepo=docker-ce-stable-debuginfo updateinfo list security all | grep -E 'Critical|Important' >> "$OUTPUT_FILE"
-else
-    echo "Error: Neither dnf nor yum found." >> "$OUTPUT_FILE"
-    exit 1
+echo "[INFO] === Starting Security Patch Check ===" > "$OUTPUT_FILE"
+echo "[INFO] Timestamp: $(date)" >> "$OUTPUT_FILE"
+echo "[INFO] Using package manager: dnf" >> "$OUTPUT_FILE"
+
+# Fetch only Critical and Important security updates, excluding docker-ce-stable-debuginfo
+SEC_UPDATES=$(sudo dnf --disablerepo=docker-ce-stable-debuginfo updateinfo list security all 2>/dev/null | grep -E 'Critical|Important')
+
+if [[ -z "$SEC_UPDATES" ]]; then
+    echo "[INFO] No critical or important security updates found." >> "$OUTPUT_FILE"
+    exit 0
 fi
 
-echo "" >> "$OUTPUT_FILE"
-echo "Security patch check completed."
+echo "[INFO] Available Critical/Important security updates:" >> "$OUTPUT_FILE"
+echo "$SEC_UPDATES" >> "$OUTPUT_FILE"
+
+# Append package names to the same file
+echo "$SEC_UPDATES" | awk '{print $3}' | grep -v '^$' | sort | uniq >> "$OUTPUT_FILE"
+echo "[INFO] Package list appended to: $OUTPUT_FILE"
