@@ -114,7 +114,7 @@ jobs:
                 --instance-type t3.medium \
                 --count 1 \
                 --subnet-id subnet-xxxxxxxx \
-                --iam-instance-profile Name=MyInstanceRole \
+                --iam-instance-profile Name=EC2PatchProfile \
                 --key-name my-key \
                 --security-group-ids sg-xxxxxxxx \
                 --query 'Instances[0].InstanceId' --output text)
