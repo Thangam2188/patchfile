@@ -1,4 +1,3 @@
-# .github/workflows/patch_windows.yml
 name: Run Windows Patch Scan and Commit Output
 
 on:
@@ -9,6 +8,7 @@ on:
 jobs:
   scan_windows_patches:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -54,21 +54,20 @@ jobs:
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "🔍 Scanning updates on $INSTANCE_ID"
 
-            # send-command to Windows instance
             CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
               --comment "Download & run Windows patch scanner" \
-              --parameters commands='[
-                "New-Item -Path ""C:\\Windows\\System32\\Patch"" -ItemType Directory -Force",
-                "Invoke-WebRequest -Uri ""'"$GITHUB_SCRIPT_URL"'"" -OutFile ""C:\\Windows\\System32\\Patch\\check_windows_patches.ps1""",
-                "powershell.exe -ExecutionPolicy Bypass -File ""C:\\Windows\\System32\\Patch\\check_windows_patches.ps1"" -InstanceId '"$INSTANCE_ID"'",
-                "Get-Content -Path ""C:\\Windows\\System32\\Patch\\"'"$INSTANCE_ID"'_patchscan.txt"" "
-              ]' \
+              --parameters "commands=[\
+\"New-Item -Path 'C:\\Windows\\System32\\Patch' -ItemType Directory -Force\",\
+\"Invoke-WebRequest -Uri '$GITHUB_SCRIPT_URL' -OutFile 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1'\",\
+\"PowerShell -ExecutionPolicy Bypass -File 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1' -InstanceId '$INSTANCE_ID'\",\
+\"Get-Content -Path 'C:\\Windows\\System32\\Patch\\${INSTANCE_ID}_patchscan.txt'\"\
+]" \
               --query "Command.CommandId" \
               --output text)
 
-            echo "➡️  Command ID: $CMD_ID"
+            echo "➡️ Command ID: $CMD_ID"
             aws ssm wait command-executed \
               --instance-id "$INSTANCE_ID" \
               --command-id "$CMD_ID"
