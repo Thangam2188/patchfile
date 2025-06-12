@@ -45,35 +45,38 @@ jobs:
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"      --profile temp
           aws configure set region                us-east-1                 --profile temp
 
-      - name: Upload PowerShell scripts to each Windows host via SSM
+      - name: Upload PowerShell scripts via SSM
         env:
           AWS_PROFILE: temp
         run: |
           RAW_BASE="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
 
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Uploading to $INSTANCE_ID"
+          # make temp dir for JSON
+          mkdir -p tmp-ssm
 
-            # build the JSON payload
-            cat << EOF > params.json
-{"commands":[
-  "New-Item -Path \\"C:\\Windows\\System32\\Patch\\Execution\\" -ItemType Directory -Force",
-  "Invoke-WebRequest -Uri \\"$RAW_BASE/check_windows_patches.ps1\\" -OutFile \\"C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1\\"",
-  "Invoke-WebRequest -Uri \\"$RAW_BASE/install_windows_patches.ps1\\" -OutFile \\"C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1\\"",
-  "Unblock-File \\"C:\\Windows\\System32\\Patch\\Execution\\*.ps1\\""
-]}
+          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+            echo "📤 Uploading scripts to $INSTANCE_ID"
+
+            # build per-instance parameters JSON
+            cat << 'EOF' > tmp-ssm/params-"$INSTANCE_ID".json
+{
+  "commands": [
+    "New-Item -Path \"C:\\Windows\\System32\\Patch\\Execution\" -ItemType Directory -Force",
+    "Invoke-WebRequest -Uri \"$RAW_BASE/check_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1\"",
+    "Invoke-WebRequest -Uri \"$RAW_BASE/install_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1\"",
+    "Unblock-File \"C:\\Windows\\System32\\Patch\\Execution\\*.ps1\""
+  ]
+}
 EOF
 
             aws ssm send-command \
               --instance-ids   "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment       "Upload patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
-              --parameters    file://params.json \
+              --comment       "Deploy patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
+              --parameters    file://tmp-ssm/params-"$INSTANCE_ID".json \
               --region        us-east-1 \
               --output        text
-
           done < Instance_windows.txt
 
-      - name: Clean up
-        if: always()
-        run: rm -f params.json
+          # clean up
+          rm -rf tmp-ssm
