@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v2
 
       - name: Install AWS CLI & tools
@@ -20,7 +20,7 @@ jobs:
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -o awscliv2.zip && sudo ./aws/install --update
 
-      - name: Get temporary AWS credentials via MFA
+      - name: Get temporary AWS creds via MFA
         id: mfa
         env:
           MFA_SECRET:            ${{ secrets.MFA_SECRET }}
@@ -40,10 +40,10 @@ jobs:
 
       - name: Configure AWS CLI profile
         run: |
-          aws configure set aws_access_key_id     ${{ env.AWS_ACCESS_KEY_ID }}      --profile temp
-          aws configure set aws_secret_access_key ${{ env.AWS_SECRET_ACCESS_KEY }}  --profile temp
-          aws configure set aws_session_token     ${{ env.AWS_SESSION_TOKEN }}      --profile temp
-          aws configure set region                us-east-1                        --profile temp
+          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID      --profile temp
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
+          aws configure set aws_session_token     $AWS_SESSION_TOKEN      --profile temp
+          aws configure set region                us-east-1               --profile temp
 
       - name: Scan for Windows Updates via SSM
         env:
@@ -51,11 +51,11 @@ jobs:
         run: |
           GITHUB_SCRIPT_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1"
 
-          # Read each Windows instance ID from Instance_windows.txt
+          # Read each Windows instance ID from your file
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "🔍 Scanning updates on $INSTANCE_ID"
 
-            # Build a per-instance commands.json
+            # Build commands.json for this instance
             cat > commands.json <<EOF
 {
   "commands": [
@@ -67,7 +67,7 @@ jobs:
 }
 EOF
 
-            # Send the SSM command
+            # Fire off the SSM run
             CMD_ID=$(aws ssm send-command \
               --instance-ids  "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
@@ -78,12 +78,12 @@ EOF
 
             echo "➡️  Command ID: $CMD_ID"
 
-            # Wait until SSM reports it as finished
+            # Wait for completion
             aws ssm wait command-executed \
               --instance-id "$INSTANCE_ID" \
               --command-id  "$CMD_ID"
 
-            # Pull down the output and save locally
+            # Retrieve and save output
             aws ssm get-command-invocation \
               --instance-id "$INSTANCE_ID" \
               --command-id  "$CMD_ID" \
@@ -101,4 +101,4 @@ EOF
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add *_patchscan.txt
           git commit -m "Windows patch scan results" || echo "No changes to commit"
-          git push
+          git push origin HEAD:main
