@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Scans Windows updates via PSWindowsUpdate (auto-installs exactly v2.1.1.2 if needed, skipping publisher check).
+  Scans Windows updates via PSWindowsUpdate v2.1.1.2 (skipping publisher check) and writes results to disk.
 
 .PARAMETER InstanceId
-  The EC2 Instance ID (passed in from your workflow).
+  The EC2 Instance ID passed in by your workflow.
 
 #>
 param(
@@ -11,37 +11,39 @@ param(
     [string]$InstanceId
 )
 
-# Drop-folder
-$PatchDir = 'C:\Windows\System32\Patch'
+# prepare drop-folder and output file
+$PatchDir   = 'C:\Windows\System32\Patch'
+$outputFile = Join-Path $PatchDir ("{0}_patchscan.txt" -f $InstanceId)
+
 if (-not (Test-Path $PatchDir)) {
     New-Item -Path $PatchDir -ItemType Directory -Force | Out-Null
 }
 
-# Header
-$now = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
-Write-Output "=== Windows Patches Scan for $InstanceId ($now) ==="
+# start fresh
+"" | Out-File -FilePath $outputFile -Encoding UTF8
 
-# Ensure PSGallery trusted
+function Log($msg) {
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$ts $msg" | Add-Content -Path $outputFile
+}
+
+Log "=== Windows Patches Scan for $InstanceId ==="
+
+# ensure PSGallery trusted
 if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
     Register-PSRepository -Default
 }
 Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
 
-# Desired version
+# install exactly v2.1.1.2 if missing (skip publisher check)
 $required = '2.1.1.2'
-$found = Get-Module -ListAvailable -Name PSWindowsUpdate | Select-Object -First 1
+$found    = Get-Module -ListAvailable -Name PSWindowsUpdate | Select-Object -First 1
 
 if (-not $found -or $found.Version.ToString() -ne $required) {
-    Write-Output "[INFO] Installing PSWindowsUpdate v$required (skipping publisher check)..."
-    # Remove any other version
+    Log "[INFO] Installing PSWindowsUpdate v$required (skipping publisher check)..."
     if ($found) {
-        try {
-            Uninstall-Module -Name PSWindowsUpdate -AllVersions -Force -ErrorAction Stop
-        } catch {
-            Write-Warning "[WARN] Could not uninstall existing PSWindowsUpdate: $_"
-        }
+        try { Uninstall-Module PSWindowsUpdate -AllVersions -Force } catch {}
     }
-
     Install-Module `
       -Name PSWindowsUpdate `
       -RequiredVersion $required `
@@ -53,24 +55,31 @@ if (-not $found -or $found.Version.ToString() -ne $required) {
 
 Import-Module PSWindowsUpdate -ErrorAction Stop
 
-# Scan
-Write-Output "[INFO] Scanning for available updates..."
+# run the scan
+Log "[INFO] Scanning for available updates..."
 try {
     $updates = Get-WUList -MicrosoftUpdate -ErrorAction Stop
 } catch {
-    Write-Error "❌ Scan failed: $_"
+    Log "[ERROR] Scan failed: $_"
     exit 1
 }
 
-# Filter Critical/Important security fixes
+# keep only security fixes of Critical or Important severity
 $secfixes = $updates |
-    Where-Object { $_.Title -match 'Security Update' -and ($_.Title -match 'Critical' -or $_.Title -match 'Important') } |
-    Select-Object @{Name='KB';Expression={$_.KB}}, @{Name='Title';Expression={$_.Title}}
+  Where-Object { $_.Title -match 'Security Update' -and (
+        $_.Title -match 'Critical' -or
+        $_.Title -match 'Important'
+    )
+  } |
+  Select-Object @{n='KB';e={$_.KB}}, @{n='Title';e={$_.Title}}
 
 if ($secfixes.Count -gt 0) {
-    $secfixes | ForEach-Object { "{0} - {1}" -f $_.KB, $_.Title }
+    Log "[INFO] Found $($secfixes.Count) security updates:"
+    $secfixes | ForEach-Object {
+        "{0} - {1}" -f $_.KB, $_.Title | Add-Content -Path $outputFile
+    }
 } else {
-    Write-Output "No important or critical security updates available."
+    Log "[INFO] No important or critical security updates available."
 }
 
 exit 0
