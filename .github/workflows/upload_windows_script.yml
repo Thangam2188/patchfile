@@ -19,26 +19,29 @@ jobs:
           sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -o awscliv2.zip && sudo ./aws/install --update
-
       - name: 🔑 Get temporary AWS creds via MFA
         id: mfa
+        env:
+          MFA_SECRET: ${{ secrets.MFA_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
         run: |
-          MFA_CODE=$(oathtool --base32 --totp "${{ secrets.MFA_SECRET }}")
+          MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           CREDS=$(aws sts get-session-token \
-            --serial-number arn:aws:iam::472598590798:mfa/TESTGIT1 \
+            --serial-number "$MFA_SERIAL_ARN" \
             --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')"     >> $GITHUB_ENV
-
+          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"  >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"     >> $GITHUB_ENV
       - name: ⚙️ Configure AWS CLI profile
         run: |
-          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID     --profile temp
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
-          aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
-          aws configure set region                us-east-1              --profile temp
+          aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"     --profile temp
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile temp
+          aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
+          aws configure set region                us-east-1                --profile temp
 
       - name: 🚀 Deploy installer & scan file via SSM
         shell: bash
