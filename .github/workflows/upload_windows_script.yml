@@ -31,7 +31,7 @@ jobs:
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           CREDS=$(aws sts get-session-token \
             --serial-number "$MFA_SERIAL_ARN" \
-            --token-code    "$MFA_CODE" \
+            --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
           echo "AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' <<<"$CREDS")"   >> $GITHUB_ENV
@@ -40,28 +40,29 @@ jobs:
 
       - name: Configure AWS CLI profile
         run: |
-          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID      --profile temp
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY  --profile temp
-          aws configure set aws_session_token     $AWS_SESSION_TOKEN      --profile temp
-          aws configure set region                us-east-1               --profile temp
+          aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"      --profile temp
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"  --profile temp
+          aws configure set aws_session_token     "$AWS_SESSION_TOKEN"      --profile temp
+          aws configure set region                us-east-1                 --profile temp
 
       - name: Upload PowerShell scripts to each Windows host via SSM
         env:
           AWS_PROFILE: temp
         run: |
           RAW_BASE="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
+
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Uploading scripts to $INSTANCE_ID"
 
-            # Build our JSON payload in one shot (params.json)
-            printf '%s\n' "{
-  \"commands\": [
-    \"New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution' -ItemType Directory -Force\",
-    \"Invoke-WebRequest -Uri '${RAW_BASE}/check_windows_patches.ps1'   -OutFile 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\check_windows_patches.ps1'\",
-    \"Invoke-WebRequest -Uri '${RAW_BASE}/install_windows_patches.ps1' -OutFile 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\install_windows_patches.ps1'\",
-    \"Unblock-File 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\*.ps1'\"
+            # Build JSON payload into params.json
+            printf '%s\n' '{
+  "commands": [
+    "New-Item -Path ''C:\\Windows\\System32\\Patch\\Execution'' -ItemType Directory -Force",
+    "Invoke-WebRequest -Uri '''"${RAW_BASE}"/check_windows_patches.ps1'' -OutFile ''C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1''",
+    "Invoke-WebRequest -Uri '''"${RAW_BASE}"/install_windows_patches.ps1'' -OutFile ''C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1''",
+    "Unblock-File ''C:\\Windows\\System32\\Patch\\Execution\\*.ps1''"
   ]
-}" > params.json
+}' > params.json
 
             aws ssm send-command \
               --instance-ids   "$INSTANCE_ID" \
@@ -73,6 +74,6 @@ jobs:
 
           done < Instance_windows.txt
 
-      - name: Clean up local params.json
+      - name: Clean up params.json
         if: always()
         run: rm -f params.json
