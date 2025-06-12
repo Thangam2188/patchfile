@@ -53,22 +53,26 @@ jobs:
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Uploading scripts to $INSTANCE_ID"
 
-            # generate a small JSON file per-instance
-            cat > params-${INSTANCE_ID}.json <<EOF
-{
-  "commands": [
-    "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri '${RAW_BASE}/check_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1'",
-    "Invoke-WebRequest -Uri '${RAW_BASE}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
-    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\*.ps1'"
+            # Build our JSON payload in one shot (params.json)
+            printf '%s\n' "{
+  \"commands\": [
+    \"New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution' -ItemType Directory -Force\",
+    \"Invoke-WebRequest -Uri '${RAW_BASE}/check_windows_patches.ps1'   -OutFile 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\check_windows_patches.ps1'\",
+    \"Invoke-WebRequest -Uri '${RAW_BASE}/install_windows_patches.ps1' -OutFile 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\install_windows_patches.ps1'\",
+    \"Unblock-File 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\*.ps1'\"
   ]
-}
-EOF
+}" > params.json
 
             aws ssm send-command \
-              --instance-ids  "$INSTANCE_ID" \
+              --instance-ids   "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment       "Upload Windows patch scripts into Patch\\Execution" \
-              --parameters    file://params-${INSTANCE_ID}.json \
+              --comment       "Upload patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
+              --parameters    file://params.json \
+              --region        us-east-1 \
               --output        text
+
           done < Instance_windows.txt
+
+      - name: Clean up local params.json
+        if: always()
+        run: rm -f params.json
