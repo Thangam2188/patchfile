@@ -23,10 +23,10 @@ jobs:
       - name: 🔑 Get temporary AWS creds via MFA
         id: mfa
         env:
-          MFA_SECRET:              ${{ secrets.MFA_SECRET }}
-          AWS_ACCESS_KEY_ID:       ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY:   ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN:          arn:aws:iam::472598590798:mfa/TESTGIT1
+          MFA_SECRET:            ${{ secrets.MFA_SECRET }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          MFA_SERIAL_ARN:        arn:aws:iam::472598590798:mfa/TESTGIT1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           CREDS=$(aws sts get-session-token \
@@ -45,12 +45,12 @@ jobs:
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
           aws configure set region                us-east-1                --profile temp
 
-      - name: Build SSM parameters JSON
+      - name: Build per-instance SSM parameters
         run: |
           mkdir -p tmp-ssm
           BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main"
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            cat << 'EOF' > tmp-ssm/params-${INSTANCE_ID}.json
+            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
 {
   "commands": [
     "New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution' -ItemType Directory -Force",
@@ -69,8 +69,8 @@ EOF
             aws ssm send-command \
               --instance-ids   "$INSTANCE_ID" \
               --document-name  AWS-RunPowerShellScript \
-              --comment        "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
               --parameters     file://tmp-ssm/params-${INSTANCE_ID}.json \
+              --comment        "Drop Windows patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
               --region         $AWS_DEFAULT_REGION \
               --output         text
           done
