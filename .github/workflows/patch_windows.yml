@@ -46,14 +46,14 @@ jobs:
           aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
           aws configure set region                us-east-1              --profile temp
 
-      - name: Download & Run Windows Patch-Scan Script via SSM
+      - name: Run Windows patch scan via SSM
         env:
           AWS_PROFILE: temp
         run: |
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "🔍 Scanning updates on $INSTANCE_ID"
 
-            # Build JSON parameters
+            # build the JSON parameters as a single blob
             JSON_PARAMS=$(cat <<EOF
 {"commands":[
   "New-Item -Path 'C:\\Windows\\System32\\Patch' -ItemType Directory -Force",
@@ -72,7 +72,7 @@ EOF
 
             echo "➡️  Command ID: $CMD_ID"
 
-            # wait up to ~15 minutes
+            # wait up to 15 minutes
             for i in {1..30}; do
               STATUS=$(aws ssm get-command-invocation \
                 --command-id "$CMD_ID" \
@@ -94,14 +94,11 @@ EOF
               fi
             done
 
-            # capture output
             aws ssm get-command-invocation \
               --command-id "$CMD_ID" \
               --instance-id "$INSTANCE_ID" \
-              --query "StandardOutputContent" \
-              --output text \
+              --query "StandardOutputContent" --output text \
               > "${INSTANCE_ID}_patchscan.txt"
-
           done < Instance_windows.txt
 
       - name: Commit scan reports
