@@ -43,31 +43,41 @@ jobs:
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
           aws configure set region                us-east-1                --profile temp
 
-      - name: Fetch each instance’s patch scan file
+      - name: Fetch each instance’s patch scan file via SSM
         run: |
+          mkdir -p tmp-ssm
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📥 Fetching patchscan for $INSTANCE_ID"
 
-            # 1) trigger SSM-run to cat the remote file
+            # 1) build a per-instance JSON for --parameters
+            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
+{
+  "commands": [
+    "Get-Content -Path \\"C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt\\""
+  ]
+}
+EOF
+
+            # 2) dispatch the SSM command
             CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment "Fetch patch scan txt" \
-              --parameters \
-                commands=["Get-Content -Path 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'"] \
-              --query 'Command.CommandId' --output text)
+              --comment "Fetch patch scan txt for $INSTANCE_ID" \
+              --parameters file://tmp-ssm/params-${INSTANCE_ID}.json \
+              --query Command.CommandId --output text)
 
-            # 2) wait for it to finish
+            # 3) wait until it finishes
             aws ssm wait command-executed \
               --instance-id "$INSTANCE_ID" \
               --command-id "$CMD_ID"
 
-            # 3) grab its stdout and write to a local file
+            # 4) capture its stdout into a local file
             aws ssm get-command-invocation \
               --instance-id "$INSTANCE_ID" \
               --command-id "$CMD_ID" \
-              --query 'StandardOutputContent' --output text \
+              --query StandardOutputContent --output text \
               > "${INSTANCE_ID}_patchscan.txt"
+
           done < Instance_windows.txt
 
       - name: Commit scan reports back to GitHub
