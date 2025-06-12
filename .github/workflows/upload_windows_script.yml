@@ -46,34 +46,33 @@ jobs:
           aws configure set region                us-east-1                --profile temp
           echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
-      - name: Deploy PowerShell scripts via SSM
-        env:
-          AWS_PROFILE: temp
+      - name: Build SSM parameter file
         run: |
           BASE_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
           mkdir -p tmp-ssm
-
-          # Build the JSON payload once
-          cat <<'EOF' > tmp-ssm/ssm-params.json
+          cat > tmp-ssm/ssm-params.json <<EOF
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri '${BASE_URL}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
+    "Invoke-WebRequest -Uri '$BASE_URL/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
     "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'"
   ]
 }
 EOF
 
-          # Push to each Windows instance
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Deploying install_windows_patches.ps1 to $INSTANCE_ID"
+      - name: Deploy install_windows_patches.ps1 via SSM
+        run: |
+          while IFS= read -r INSTANCE_ID || [ -n "$INSTANCE_ID" ]; do
+            echo "📤 Deploying to $INSTANCE_ID"
             aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
-              --document-name  "AWS-RunPowerShellScript" \
-              --comment        "Drop install_windows_patches.ps1 to C:\\Windows\\System32\\Patch\\Execution" \
-              --parameters     file://tmp-ssm/ssm-params.json \
-              --region         us-east-1 \
-              --output         text
+              --instance-ids       "$INSTANCE_ID" \
+              --document-name      AWS-RunPowerShellScript \
+              --comment            "Deploy install_windows_patches.ps1" \
+              --parameters         file://tmp-ssm/ssm-params.json \
+              --region             us-east-1 \
+              --output             text
           done < Instance_windows.txt
 
+      - name: Clean up
+        run: |
           rm -rf tmp-ssm
