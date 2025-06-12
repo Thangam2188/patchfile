@@ -52,17 +52,17 @@ jobs:
           RAW_BASE="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
 
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Uploading scripts to $INSTANCE_ID"
+            echo "📤 Uploading to $INSTANCE_ID"
 
-            # Build JSON payload into params.json
-            printf '%s\n' '{
-  "commands": [
-    "New-Item -Path ''C:\\Windows\\System32\\Patch\\Execution'' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri '''"${RAW_BASE}"/check_windows_patches.ps1'' -OutFile ''C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1''",
-    "Invoke-WebRequest -Uri '''"${RAW_BASE}"/install_windows_patches.ps1'' -OutFile ''C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1''",
-    "Unblock-File ''C:\\Windows\\System32\\Patch\\Execution\\*.ps1''"
-  ]
-}' > params.json
+            # build the JSON payload
+            cat << EOF > params.json
+{"commands":[
+  "New-Item -Path \\"C:\\Windows\\System32\\Patch\\Execution\\" -ItemType Directory -Force",
+  "Invoke-WebRequest -Uri \\"$RAW_BASE/check_windows_patches.ps1\\" -OutFile \\"C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1\\"",
+  "Invoke-WebRequest -Uri \\"$RAW_BASE/install_windows_patches.ps1\\" -OutFile \\"C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1\\"",
+  "Unblock-File \\"C:\\Windows\\System32\\Patch\\Execution\\*.ps1\\""
+]}
+EOF
 
             aws ssm send-command \
               --instance-ids   "$INSTANCE_ID" \
@@ -74,6 +74,6 @@ jobs:
 
           done < Instance_windows.txt
 
-      - name: Clean up params.json
+      - name: Clean up
         if: always()
         run: rm -f params.json
