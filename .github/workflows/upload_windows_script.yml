@@ -10,7 +10,7 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
 
     steps:
-      - name: Checkout repo (contains install_windows_patches.ps1 & *_patchscan.txt)
+      - name: Checkout repo
         uses: actions/checkout@v2
 
       - name: Install AWS CLI & tools
@@ -35,16 +35,16 @@ jobs:
             --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"     >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId <<< "$CREDS")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey <<< "$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken <<< "$CREDS")"     >> $GITHUB_ENV
 
       - name: Configure AWS CLI profile
         run: |
           aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"     --profile temp
           aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile temp
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
-          aws configure set region                us-east-1                --profile temp
+          aws configure set region                "us-east-1"              --profile temp
           echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
       - name: Deploy install & scan files via SSM
@@ -57,7 +57,8 @@ jobs:
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Deploying to $INSTANCE_ID"
 
-            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
+            # build per-instance JSON payload
+            cat > tmp-ssm/params-${INSTANCE_ID}.json << EOF
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
@@ -71,8 +72,8 @@ EOF
 
             aws ssm send-command \
               --instance-ids   "$INSTANCE_ID" \
-              --document-name  AWS-RunPowerShellScript \
-              --comment        "Drop patch installer & scan result" \
+              --document-name  "AWS-RunPowerShellScript" \
+              --comment        "Deploy Windows patch installer & scan result" \
               --parameters     file://tmp-ssm/params-${INSTANCE_ID}.json \
               --output         text
           done < Instance_windows.txt
