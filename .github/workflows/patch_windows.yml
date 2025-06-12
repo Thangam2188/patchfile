@@ -1,0 +1,98 @@
+name: Run Windows Patch Scan and Commit Output
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '0 0 * * 1'  # Every Monday at midnight UTC
+
+jobs:
+  scan_windows_patches:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+
+      - name: Install AWS CLI & Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y oathtool jq curl unzip
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+          unzip -o awscliv2.zip && sudo ./aws/install --update
+
+      - name: Get temporary AWS creds via MFA
+        id: mfa
+        env:
+          MFA_SECRET: ${{ secrets.MFA_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+        run: |
+          MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
+          CREDS=$(aws sts get-session-token \
+            --serial-number $MFA_SERIAL_ARN \
+            --token-code $MFA_CODE \
+            --duration-seconds 3600 \
+            --output json)
+          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"  >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"       >> $GITHUB_ENV
+
+      - name: Configure AWS CLI
+        run: |
+          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID     --profile temp
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
+          aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
+          aws configure set region                us-east-1              --profile temp
+
+      - name: Scan for Windows Updates via SSM
+        env:
+          AWS_PROFILE: temp
+        run: |
+          # read instance IDs from your Windows-specific file
+          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+            echo "🔍 Scanning updates on $INSTANCE_ID"
+
+            CMD_ID=$(aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunPatchBaseline" \
+              --parameters Operation=Scan \
+              --query "Command.CommandId" --output text)
+
+            echo "➡️  Command ID: $CMD_ID"
+
+            # wait up to ~15 minutes for scan to complete
+            for i in {1..30}; do
+              STATUS=$(aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "$INSTANCE_ID" \
+                --query "Status" --output text)
+              echo "   • Status: $STATUS"
+              if [[ "$STATUS" == "Success" ]]; then
+                break
+              elif [[ "$STATUS" =~ ^(Failed|Cancelled|TimedOut)$ ]]; then
+                echo "❌ Scan failed on $INSTANCE_ID"
+                exit 1
+              else
+                sleep 30
+              fi
+            done
+
+            echo "📥 Retrieving scan report..."
+            aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "StandardOutputContent" --output text \
+              > "${INSTANCE_ID}_patchscan.txt"
+
+          done < Instance_windows.txt
+
+      - name: Commit scan reports
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add *_patchscan.txt
+          git commit -m "Windows patch scan results" || echo "No changes to commit"
+          git push
