@@ -11,50 +11,64 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v2
 
-      - name: Install AWS CLI & Tools
+      - name: Install AWS CLI & tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y oathtool jq curl
+          sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -o awscliv2.zip && sudo ./aws/install --update
+          unzip -o awscliv2.zip
+          sudo ./aws/install --update
+          aws --version
 
       - name: Get temporary AWS creds via MFA
         id: mfa
         env:
-          MFA_SECRET: ${{ secrets.MFA_SECRET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          MFA_SECRET:            ${{ secrets.MFA_SECRET }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+          MFA_SERIAL_ARN:        arn:aws:iam::472598590798:mfa/TESTGIT1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           CREDS=$(aws sts get-session-token \
-            --serial-number $MFA_SERIAL_ARN --token-code $MFA_CODE \
-            --duration-seconds 3600 --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")" >> $GITHUB_ENV
+            --serial-number "$MFA_SERIAL_ARN" \
+            --token-code    "$MFA_CODE" \
+            --duration-seconds 3600 \
+            --output json)
+          echo "AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' <<<"$CREDS")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' <<<"$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' <<<"$CREDS")"     >> $GITHUB_ENV
 
-      - name: Configure AWS CLI
+      - name: Configure AWS CLI profile
         run: |
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID --profile temp
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
-          aws configure set aws_session_token $AWS_SESSION_TOKEN --profile temp
-          aws configure set region us-east-1 --profile temp
+          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID      --profile temp
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY  --profile temp
+          aws configure set aws_session_token     $AWS_SESSION_TOKEN      --profile temp
+          aws configure set region                us-east-1               --profile temp
 
-      - name: Upload PowerShell Scripts via SSM
+      - name: Upload PowerShell scripts to each Windows host via SSM
         env:
           AWS_PROFILE: temp
         run: |
-          for INSTANCE_ID in $(cat Instance_windows.txt); do
-            echo "Uploading to $INSTANCE_ID"
+          RAW_BASE="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
+          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+            echo "📤 Uploading scripts to $INSTANCE_ID"
+
+            # generate a small JSON file per-instance
+            cat > params-${INSTANCE_ID}.json <<EOF
+{
+  "commands": [
+    "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
+    "Invoke-WebRequest -Uri '${RAW_BASE}/check_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1'",
+    "Invoke-WebRequest -Uri '${RAW_BASE}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
+    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\*.ps1'"
+  ]
+}
+EOF
+
             aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
+              --instance-ids  "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment "Upload patch scripts" \
-              --parameters commands=[
-                "New-Item -ItemType Directory -Path C:\Scripts -Force",
-                "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1 -OutFile C:\Scripts\check_windows_patches.ps1",
-                "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Thangam2188/patchfile/main/install_windows_patches.ps1 -OutFile C:\Scripts\install_windows_patches.ps1",
-                "Unblock-File C:\Scripts\*.ps1"
-              ]
-          done
+              --comment       "Upload Windows patch scripts into Patch\\Execution" \
+              --parameters    file://params-${INSTANCE_ID}.json \
+              --output        text
+          done < Instance_windows.txt
