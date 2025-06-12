@@ -41,7 +41,7 @@ jobs:
       - name: Configure AWS CLI profile
         run: |
           aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID      --profile temp
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY  --profile temp
           aws configure set aws_session_token     $AWS_SESSION_TOKEN      --profile temp
           aws configure set region                us-east-1               --profile temp
 
@@ -51,12 +51,11 @@ jobs:
         run: |
           GITHUB_SCRIPT_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1"
 
-          # Read each Windows instance ID from your file
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "🔍 Scanning updates on $INSTANCE_ID"
 
-            # Build commands.json for this instance
-            cat > commands.json <<EOF
+            # build our small SSM params JSON
+            cat > ssm-params.json <<EOF
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch' -ItemType Directory -Force",
@@ -67,23 +66,21 @@ jobs:
 }
 EOF
 
-            # Fire off the SSM run
+            # send it
             CMD_ID=$(aws ssm send-command \
               --instance-ids  "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment        "Run Windows patch scan" \
-              --parameters     file://commands.json \
-              --query          "Command.CommandId" \
-              --output         text)
+              --comment       "Run Windows patch scan" \
+              --parameters    file://ssm-params.json \
+              --query         "Command.CommandId" \
+              --output        text)
 
             echo "➡️  Command ID: $CMD_ID"
 
-            # Wait for completion
             aws ssm wait command-executed \
               --instance-id "$INSTANCE_ID" \
               --command-id  "$CMD_ID"
 
-            # Retrieve and save output
             aws ssm get-command-invocation \
               --instance-id "$INSTANCE_ID" \
               --command-id  "$CMD_ID" \
