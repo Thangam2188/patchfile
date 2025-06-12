@@ -10,63 +10,64 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v2
+    - name: Checkout repo
+      uses: actions/checkout@v2
 
-      - name: Install AWS CLI & tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y oathtool jq curl unzip
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -o awscliv2.zip && sudo ./aws/install --update
-          aws --version
+    - name: Install AWS CLI & tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y oathtool jq curl unzip
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+        unzip -o awscliv2.zip && sudo ./aws/install --update
+        aws --version
 
-      - name: Get temporary AWS creds via MFA
-        id: mfa
-        run: |
-          MFA_CODE=$(oathtool --base32 --totp "${{ secrets.MFA_SECRET }}")
-          CREDS=$(aws sts get-session-token \
-            --serial-number arn:aws:iam::472598590798:mfa/TESTGIT1 \
-            --token-code $MFA_CODE \
-            --duration-seconds 3600 \
-            --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"     >> $GITHUB_ENV
+    - name: Get temporary AWS creds via MFA
+      id: mfa
+      run: |
+        MFA_CODE=$(oathtool --base32 --totp "${{ secrets.MFA_SECRET }}")
+        CREDS=$(aws sts get-session-token \
+          --serial-number arn:aws:iam::472598590798:mfa/TESTGIT1 \
+          --token-code $MFA_CODE \
+          --duration-seconds 3600 \
+          --output json)
+        echo "AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .Credentials.AccessKeyId)"   >> $GITHUB_ENV
+        echo "AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
+        echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .Credentials.SessionToken)"     >> $GITHUB_ENV
 
-      - name: Configure AWS CLI profile
-        run: |
-          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID     --profile temp
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
-          aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
-          aws configure set region                $AWS_DEFAULT_REGION    --profile temp
+    - name: Configure AWS CLI profile
+      run: |
+        aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID     --profile temp
+        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
+        aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
+        aws configure set region                $AWS_DEFAULT_REGION    --profile temp
 
-      - name: Build SSM parameters JSON
-        run: |
-          cat << 'EOF' > params.json
+    - name: Build SSM parameters JSON
+      run: |
+        cat << 'EOF' > params.json
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
+    "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1'",
     "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Thangam2188/patchfile/main/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
-    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'"
+    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\*.ps1'"
   ]
 }
 EOF
 
-      - name: Deploy PowerShell installer via SSM
-        env:
-          AWS_PROFILE: temp
-        run: |
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Deploying scripts to $INSTANCE_ID"
-            aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
-              --document-name "AWS-RunPowerShellScript" \
-              --comment       "Upload Windows patch installer" \
-              --parameters    file://params.json \
-              --region        $AWS_DEFAULT_REGION \
-              --output text
-          done < Instance_windows.txt
+    - name: Deploy PowerShell scripts via SSM
+      env:
+        AWS_PROFILE: temp
+      run: |
+        while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+          echo "📤 Deploying scripts to $INSTANCE_ID"
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunPowerShellScript" \
+            --comment "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
+            --parameters file://params.json \
+            --region $AWS_DEFAULT_REGION \
+            --output text
+        done < Instance_windows.txt
 
-      - name: Clean up
-        run: rm -f params.json
+    - name: Clean up
+      run: rm -f params.json
