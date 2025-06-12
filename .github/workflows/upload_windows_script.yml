@@ -45,12 +45,12 @@ jobs:
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
           aws configure set region                us-east-1                --profile temp
 
-      - name: Build per-instance SSM parameters
+      - name: Build per-instance SSM parameter files
         run: |
           mkdir -p tmp-ssm
           BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main"
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
+            cat > tmp-ssm/params-${INSTANCE_ID}.json <<EOF
 {
   "commands": [
     "New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution' -ItemType Directory -Force",
@@ -70,7 +70,7 @@ EOF
               --instance-ids   "$INSTANCE_ID" \
               --document-name  AWS-RunPowerShellScript \
               --parameters     file://tmp-ssm/params-${INSTANCE_ID}.json \
-              --comment        "Drop Windows patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
+              --comment        "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
               --region         $AWS_DEFAULT_REGION \
               --output         text
           done
