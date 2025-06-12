@@ -6,14 +6,14 @@ on:
     - cron: '0 0 * * 1'  # Every Monday at midnight UTC
 
 jobs:
-  scan_windows_patches:
+  windows_patch_scan:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: 📥 Checkout repository
         uses: actions/checkout@v2
 
-      - name: Install AWS CLI & helper tools
+      - name: 🛠 Install AWS CLI & tools
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq curl unzip
@@ -21,7 +21,7 @@ jobs:
           unzip -o awscliv2.zip && sudo ./aws/install --update
           aws --version
 
-      - name: Get temporary AWS creds via MFA
+      - name: 🔑 Get temporary AWS creds via MFA
         id: mfa
         env:
           MFA_SECRET:            ${{ secrets.MFA_SECRET }}
@@ -39,43 +39,42 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .Credentials.SessionToken)"     >> $GITHUB_ENV
 
-      - name: Configure AWS CLI with temporary creds
+      - name: ⚙️ Configure AWS CLI with temp creds
         run: |
           aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID     --profile temp-mfa
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp-mfa
           aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp-mfa
           aws configure set region                us-east-1              --profile temp-mfa
 
-      - name: Scan Windows Updates via SSM
+      - name: 🔍 Scan for Windows Updates via SSM
         env:
           AWS_PROFILE: temp-mfa
         run: |
+          # prepare a place for per-instance JSON
           mkdir -p cmd_params
 
+          # loop through your Windows instance list
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "🔍 Scanning updates on $INSTANCE_ID"
+            echo "=== Scanning updates on $INSTANCE_ID ==="
 
-            # Create a per-instance JSON to pass into SSM
-            cat << 'JSON' > cmd_params/${INSTANCE_ID}.json
-{
-  "commands": [
-    "New-Item -Path 'C:\\Windows\\System32\\Patch' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1'",
-    "powershell.exe -ExecutionPolicy Bypass -File 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1' -InstanceId ${INSTANCE_ID}"
-  ]
-}
-JSON
+            # build the JSON payload with jq to avoid quoting hell
+            jq -n \
+              --arg c1 "New-Item -Path 'C:\\Windows\\System32\\Patch' -ItemType Directory -Force" \
+              --arg c2 "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/${{ github.repository }}/main/check_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1'" \
+              --arg c3 "powershell.exe -ExecutionPolicy Bypass -File 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1' -InstanceId $INSTANCE_ID" \
+              '{commands: [$c1,$c2,$c3]}' \
+              > cmd_params/${INSTANCE_ID}.json
 
-            # Send the command
+            # dispatch the SSM PowerShell‐script command
             CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
               --parameters file://cmd_params/${INSTANCE_ID}.json \
               --query 'Command.CommandId' --output text)
 
-            echo "➡️ Command ID: $CMD_ID"
+            echo "→ Command ID: $CMD_ID"
 
-            # Poll for up to ~15 minutes
+            # poll for up to ~15 minutes
             for i in {1..30}; do
               STATUS=$(aws ssm get-command-invocation \
                 --command-id "$CMD_ID" \
@@ -89,22 +88,24 @@ JSON
                 aws ssm get-command-invocation \
                   --command-id "$CMD_ID" \
                   --instance-id "$INSTANCE_ID" \
-                  --query 'StandardErrorContent' --output text
+                  --query 'StandardErrorContent' \
+                  --output text
                 exit 1
               else
                 sleep 30
               fi
             done
 
-            # Grab the output
+            # fetch and store the output
             aws ssm get-command-invocation \
               --command-id "$CMD_ID" \
               --instance-id "$INSTANCE_ID" \
               --query 'StandardOutputContent' --output text \
               > "${INSTANCE_ID}_patchscan.txt"
+
           done < Instance_windows.txt
 
-      - name: Commit scan reports
+      - name: 📄 Commit scan reports
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
