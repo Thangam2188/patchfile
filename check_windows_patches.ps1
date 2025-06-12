@@ -1,41 +1,21 @@
-<#
-.SYNOPSIS
-  Scans for available Windows updates and writes a report.
+param(
+  [string]$InstanceId
+)
 
-.DESCRIPTION
-  Installs PSWindowsUpdate module if missing, then lists all available updates
-  (including Microsoft Update catalog) and writes them to a file.
+$OutputDir  = "C:\Windows\System32\Patch"
+$OutputFile = Join-Path $OutputDir "$InstanceId`_patchscan.txt"
 
-.NOTES
-  Requires administrative privileges.
-#>
+"=== Windows Patches Scan for $InstanceId ($(Get-Date)) ===" |
+  Out-File -FilePath $OutputFile -Encoding UTF8
 
-# Parameters
-$ScriptDir = "C:\Scripts"
-$OutputFile = Join-Path $ScriptDir "available_updates.txt"
-
-# Ensure output directory exists
-if (-not (Test-Path $ScriptDir)) {
-    New-Item -Path $ScriptDir -ItemType Directory | Out-Null
-}
-
-# Install PSWindowsUpdate module if not present
-if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-    Install-Module -Name PSWindowsUpdate -Force -Confirm:$false
-}
-Import-Module PSWindowsUpdate
-
-# Start scan
-"=== Windows Update Scan Report ===" | Out-File $OutputFile
-"Generated at: $(Get-Date)"    | Out-File $OutputFile -Append
-""                              | Out-File $OutputFile -Append
-
-# List available updates
-$updates = Get-WindowsUpdate -MicrosoftUpdate -IgnoreReboot -AcceptAll -ListOnly
-if (-not $updates) {
-    "No updates available." | Out-File $OutputFile -Append
+# Use the SSM patch baseline scan results or custom logic here.
+# For demonstration, we’ll list pending updates via PSWindowsUpdate module:
+if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
+  Import-Module PSWindowsUpdate
+  Get-WindowsUpdate -MicrosoftUpdate -AcceptAll |
+    Select-Object -Property Title,KB,Size |
+    Out-File -FilePath $OutputFile -Append -Encoding UTF8
 } else {
-    $updates | ForEach-Object {
-        "{0} | {1} | {2}" -f $_.KBArticleID, $_.Title, $_.Size | Out-File $OutputFile -Append
-    }
+  "PSWindowsUpdate module not installed; no detailed scan performed." |
+    Out-File -FilePath $OutputFile -Append -Encoding UTF8
 }
