@@ -2,7 +2,7 @@ param(
   [string]$InstanceId
 )
 
-$PatchDir   = "C:\Windows\System32\Patch"
+$PatchDir   = "C:\Windows\system32\Patch\Execution"
 $PatchFile  = Join-Path $PatchDir "$InstanceId`_patchscan.txt"
 $LogFile    = Join-Path $PatchDir "patch_install_log.txt"
 
