@@ -24,20 +24,20 @@ jobs:
       - name: Get temporary AWS creds via MFA
         id: mfa
         env:
-          MFA_SECRET: ${{ secrets.MFA_SECRET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          MFA_SECRET:      ${{ secrets.MFA_SECRET }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+          MFA_SERIAL_ARN:        arn:aws:iam::472598590798:mfa/TESTGIT1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           CREDS=$(aws sts get-session-token \
             --serial-number "$MFA_SERIAL_ARN" \
-            --token-code "$MFA_CODE" \
+            --token-code    "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"      >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId'<<<"$CREDS")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey'<<<"$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken'<<<"$CREDS")"     >> $GITHUB_ENV
 
       - name: Configure AWS CLI profile
         run: |
@@ -55,35 +55,40 @@ jobs:
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "🔍 Scanning updates on $INSTANCE_ID"
 
-            # build a small JSON file with the 4 commands
-            cat <<EOF > ssm-commands.json
+            # build a JSON file with the four PowerShell commands
+            cat > ssm-commands.json <<EOF
 {
   "commands": [
-    "New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri '$GITHUB_SCRIPT_URL' -OutFile 'C:\\\\Windows\\\\System32\\\\Patch\\\\check_windows_patches.ps1'",
-    "PowerShell -ExecutionPolicy Bypass -File 'C:\\\\Windows\\\\System32\\\\Patch\\\\check_windows_patches.ps1' -InstanceId '$INSTANCE_ID'",
-    "Get-Content -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\${INSTANCE_ID}_patchscan.txt'"
+    "New-Item -Path 'C:\\Windows\\System32\\Patch' -ItemType Directory -Force",
+    "Invoke-WebRequest -Uri \"$GITHUB_SCRIPT_URL\" -OutFile 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1'",
+    "PowerShell -ExecutionPolicy Bypass -File 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1' -InstanceId \"$INSTANCE_ID\"",
+    "Get-Content -Path 'C:\\Windows\\System32\\Patch\\${INSTANCE_ID}_patchscan.txt'"
   ]
 }
 EOF
 
-            # call SSM using our JSON
+            # fire off the SSM RunPowerShellScript document with our JSON
             CMD_ID=$(aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "AWS-RunPowerShellScript" \
-              --comment "Download & run Windows patch scanner" \
-              --parameters file://ssm-commands.json \
-              --query "Command.CommandId" \
-              --output text)
+              --instance-ids   "$INSTANCE_ID" \
+              --document-name  "AWS-RunPowerShellScript" \
+              --comment        "Download & run Windows patch scanner" \
+              --parameters     file://ssm-commands.json \
+              --query          "Command.CommandId" \
+              --output         text)
 
             echo "➡️ Command ID: $CMD_ID"
-            aws ssm wait command-executed --instance-id "$INSTANCE_ID" --command-id "$CMD_ID"
 
-            # grab the output
+            # wait until it's done
+            aws ssm wait command-executed \
+              --instance-id "$INSTANCE_ID" \
+              --command-id  "$CMD_ID"
+
+            # grab the output and stash it in a file
             aws ssm get-command-invocation \
               --instance-id "$INSTANCE_ID" \
-              --command-id "$CMD_ID" \
-              --query "StandardOutputContent" --output text \
+              --command-id  "$CMD_ID" \
+              --query       "StandardOutputContent" \
+              --output      text \
               > "${INSTANCE_ID}_patchscan.txt"
 
           done < Instance_windows.txt
