@@ -13,18 +13,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Install AWS CLI & Tools
+      - name: Install AWS CLI & tools
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -o awscliv2.zip && sudo ./aws/install --update
-          aws --version
 
-      - name: Get temporary AWS creds via MFA
+      - name: Get temporary AWS credentials via MFA
         id: mfa
         env:
-          MFA_SECRET:      ${{ secrets.MFA_SECRET }}
+          MFA_SECRET:            ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           MFA_SERIAL_ARN:        arn:aws:iam::472598590798:mfa/TESTGIT1
@@ -35,16 +34,16 @@ jobs:
             --token-code    "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId'<<<"$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey'<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken'<<<"$CREDS")"     >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' <<<"$CREDS")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' <<<"$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' <<<"$CREDS")"     >> $GITHUB_ENV
 
       - name: Configure AWS CLI profile
         run: |
-          aws configure set aws_access_key_id     ${{ env.AWS_ACCESS_KEY_ID }}     --profile temp
-          aws configure set aws_secret_access_key ${{ env.AWS_SECRET_ACCESS_KEY }} --profile temp
-          aws configure set aws_session_token     ${{ env.AWS_SESSION_TOKEN }}     --profile temp
-          aws configure set region                us-east-1                      --profile temp
+          aws configure set aws_access_key_id     ${{ env.AWS_ACCESS_KEY_ID }}      --profile temp
+          aws configure set aws_secret_access_key ${{ env.AWS_SECRET_ACCESS_KEY }}  --profile temp
+          aws configure set aws_session_token     ${{ env.AWS_SESSION_TOKEN }}      --profile temp
+          aws configure set region                us-east-1                        --profile temp
 
       - name: Scan for Windows Updates via SSM
         env:
@@ -52,38 +51,39 @@ jobs:
         run: |
           GITHUB_SCRIPT_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1"
 
+          # Read each Windows instance ID from Instance_windows.txt
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "🔍 Scanning updates on $INSTANCE_ID"
 
-            # build a JSON file with the four PowerShell commands
-            cat > ssm-commands.json <<EOF
+            # Build a per-instance commands.json
+            cat > commands.json <<EOF
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri \"$GITHUB_SCRIPT_URL\" -OutFile 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1'",
-    "PowerShell -ExecutionPolicy Bypass -File 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1' -InstanceId \"$INSTANCE_ID\"",
+    "Invoke-WebRequest -Uri '$GITHUB_SCRIPT_URL' -OutFile 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1'",
+    "PowerShell -ExecutionPolicy Bypass -File 'C:\\Windows\\System32\\Patch\\check_windows_patches.ps1' -InstanceId '$INSTANCE_ID'",
     "Get-Content -Path 'C:\\Windows\\System32\\Patch\\${INSTANCE_ID}_patchscan.txt'"
   ]
 }
 EOF
 
-            # fire off the SSM RunPowerShellScript document with our JSON
+            # Send the SSM command
             CMD_ID=$(aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
-              --document-name  "AWS-RunPowerShellScript" \
-              --comment        "Download & run Windows patch scanner" \
-              --parameters     file://ssm-commands.json \
+              --instance-ids  "$INSTANCE_ID" \
+              --document-name "AWS-RunPowerShellScript" \
+              --comment        "Run Windows patch scan" \
+              --parameters     file://commands.json \
               --query          "Command.CommandId" \
               --output         text)
 
-            echo "➡️ Command ID: $CMD_ID"
+            echo "➡️  Command ID: $CMD_ID"
 
-            # wait until it's done
+            # Wait until SSM reports it as finished
             aws ssm wait command-executed \
               --instance-id "$INSTANCE_ID" \
               --command-id  "$CMD_ID"
 
-            # grab the output and stash it in a file
+            # Pull down the output and save locally
             aws ssm get-command-invocation \
               --instance-id "$INSTANCE_ID" \
               --command-id  "$CMD_ID" \
