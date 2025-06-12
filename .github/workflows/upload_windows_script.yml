@@ -1,7 +1,7 @@
 name: Upload Windows Patch Scripts to EC2
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   upload_windows_scripts:
@@ -34,9 +34,9 @@ jobs:
             --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"     >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
       - name: Configure AWS CLI
         run: |
@@ -45,14 +45,10 @@ jobs:
           aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
           aws configure set region                us-east-1              --profile temp
 
-      - name: Deploy PowerShell scripts via SSM
-        env:
-          AWS_PROFILE: temp
+      - name: Build SSM parameter file
         run: |
           BASE_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
           mkdir -p tmp-ssm
-
-          # Build the JSON parameters for SSM
           cat <<EOF > tmp-ssm/ssm-params.json
 {
   "commands": [
@@ -64,16 +60,17 @@ jobs:
 }
 EOF
 
-          # Send that payload to each Windows instance
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+      - name: Deploy PowerShell scripts via SSM
+        env:
+          AWS_PROFILE: temp
+        run: |
+          while IFS= read -r INSTANCE_ID || [ -n "$INSTANCE_ID" ]; do
             echo "📤 Deploying scripts to $INSTANCE_ID"
             aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
+              --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment       "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
-              --parameters    file://tmp-ssm/ssm-params.json \
-              --region        us-east-1 \
+              --comment "Drop patch scripts into C:\\Windows\\System32\\Patch\\Execution" \
+              --parameters file://tmp-ssm/ssm-params.json \
+              --region us-east-1 \
               --output text
           done < Instance_windows.txt
-
-          rm -rf tmp-ssm
