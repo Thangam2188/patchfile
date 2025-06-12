@@ -48,18 +48,31 @@ jobs:
         env:
           AWS_PROFILE: temp
         run: |
+          mkdir -p tmp-ssm
           BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main"
+
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Deploying to $INSTANCE_ID"
 
-            # build JSON-array for --parameters
-            params=$(printf '["New-Item -Path \"C:\\Windows\\System32\\Patch\\Execution\" -ItemType Directory -Force","Invoke-WebRequest -Uri \"%s/install_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1\"","Invoke-WebRequest -Uri \"%s/%s_patchscan.txt\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\%s_patchscan.txt\"","Unblock-File -Path \"C:\\Windows\\System32\\Patch\\Execution\\*.ps1\""]' \
-              "$BASE_URL" "$BASE_URL" "$INSTANCE_ID" "$INSTANCE_ID")
+            # build a temp JSON file that is guaranteed to be valid
+            jq -n \
+              --arg url     "$BASE_URL/install_windows_patches.ps1" \
+              --arg scanurl "$BASE_URL/${INSTANCE_ID}_patchscan.txt" \
+              --arg inst    "$INSTANCE_ID" \
+              '{
+                commands: [
+                  "New-Item -Path \"C:\\Windows\\System32\\Patch\\Execution\" -ItemType Directory -Force",
+                  ("Invoke-WebRequest -Uri \"\($url)\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1\""),
+                  ("Invoke-WebRequest -Uri \"\($scanurl)\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\\($inst)_patchscan.txt\""),
+                  "Unblock-File -Path \"C:\\Windows\\System32\\Patch\\Execution\\*.ps1\""
+                ]
+              }' > tmp-ssm/${INSTANCE_ID}.json
 
             aws ssm send-command \
-              --instance-ids  "$INSTANCE_ID" \
-              --document-name AWS-RunPowerShellScript \
-              --comment       "Drop install script & scan file" \
-              --parameters    commands="$params" \
-              --output        text
+              --instance-ids    "$INSTANCE_ID" \
+              --document-name   AWS-RunPowerShellScript \
+              --comment         "Drop scripts to C:\\Windows\\System32\\Patch\\Execution" \
+              --parameters      file://tmp-ssm/${INSTANCE_ID}.json \
+              --output          text
+
           done < Instance_windows.txt
