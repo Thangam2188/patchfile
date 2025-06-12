@@ -18,7 +18,6 @@ jobs:
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -o awscliv2.zip
           sudo ./aws/install --update
-          aws --version
 
       - name: Get temporary AWS creds via MFA
         id: mfa
@@ -38,44 +37,46 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' <<<"$CREDS")" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' <<<"$CREDS")"     >> $GITHUB_ENV
 
-      - name: Configure AWS CLI profile
+      - name: Configure AWS CLI with Temp Profile
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN:     ${{ env.AWS_SESSION_TOKEN }}
         run: |
           aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"      --profile temp
           aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"  --profile temp
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"      --profile temp
           aws configure set region                us-east-1                 --profile temp
 
-      - name: Upload PowerShell scripts via SSM
+      - name: Deploy PowerShell scripts via SSM
         env:
           AWS_PROFILE: temp
         run: |
           BASE_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
-
-          # prepare workspace
           mkdir -p tmp-ssm
 
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Deploying scripts to $INSTANCE_ID"
-
-            cat << 'EOF' > tmp-ssm/params-"$INSTANCE_ID".json
+          # build one JSON file
+          cat << 'EOF' > tmp-ssm/params.json
 {
   "commands": [
     "New-Item -Path \"C:\\Windows\\System32\\Patch\\Execution\" -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri \"$BASE_URL/check_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1\"",
-    "Invoke-WebRequest -Uri \"$BASE_URL/install_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1\"",
+    "Invoke-WebRequest -Uri \"${BASE_URL}/check_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1\"",
+    "Invoke-WebRequest -Uri \"${BASE_URL}/install_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1\"",
     "Unblock-File \"C:\\Windows\\System32\\Patch\\Execution\\*.ps1\""
   ]
 }
 EOF
 
+          # loop through your Windows instances list
+          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+            echo "📤 Deploying scripts to $INSTANCE_ID"
             aws ssm send-command \
               --instance-ids   "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment       "Deploy patch scripts to C:\Windows\System32\Patch\Execution" \
-              --parameters    file://tmp-ssm/params-"$INSTANCE_ID".json \
+              --comment       "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
+              --parameters    file://tmp-ssm/params.json \
               --region        us-east-1 \
               --output        text
           done < Instance_windows.txt
 
-          # cleanup
           rm -rf tmp-ssm
