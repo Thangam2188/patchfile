@@ -47,7 +47,7 @@ jobs:
           aws configure set region                "us-east-1"              --profile temp
           echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
-      - name: Deploy install & scan files via SSM
+      - name: Deploy installer & scan results via SSM
         env:
           AWS_PROFILE: temp
         run: |
@@ -57,8 +57,8 @@ jobs:
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Deploying to $INSTANCE_ID"
 
-            # build per-instance JSON payload
-            cat > tmp-ssm/params-${INSTANCE_ID}.json << EOF
+            # build per-instance JSON
+            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
@@ -71,11 +71,11 @@ jobs:
 EOF
 
             aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
-              --document-name  "AWS-RunPowerShellScript" \
-              --comment        "Deploy Windows patch installer & scan result" \
-              --parameters     file://tmp-ssm/params-${INSTANCE_ID}.json \
-              --output         text
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunPowerShellScript" \
+              --comment "Deploy Windows patch installer & scan" \
+              --parameters file://tmp-ssm/params-${INSTANCE_ID}.json \
+              --output text
           done < Instance_windows.txt
 
           rm -rf tmp-ssm
