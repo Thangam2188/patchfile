@@ -1,16 +1,18 @@
-name: Upload Windows Patch Scripts to EC2
+name: Deploy Windows Installer & Patch-Scan to EC2 (Execution folder)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1'   # Every Monday at midnight UTC
 
 jobs:
-  upload_windows_scripts:
+  deploy_and_copy:
     runs-on: ubuntu-latest
     env:
       AWS_DEFAULT_REGION: us-east-1
 
     steps:
-      - name: Checkout repo
+      - name: 📥 Checkout repository
         uses: actions/checkout@v2
 
       - name: 🛠 Install AWS CLI & dependencies
@@ -45,12 +47,12 @@ jobs:
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
           aws configure set region                us-east-1                --profile temp
 
-      - name: Build per-instance SSM parameter files
+      - name: 📑 Build per-instance SSM JSON
         run: |
           mkdir -p tmp-ssm
           BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main"
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            cat > tmp-ssm/params-${INSTANCE_ID}.json <<EOF
+            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
 {
   "commands": [
     "New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution' -ItemType Directory -Force",
@@ -62,16 +64,17 @@ jobs:
 EOF
           done < Instance_windows.txt
 
-      - name: 🔄 Deploy PowerShell scripts via SSM
+      - name: 🚀 Deploy installer & scan-copy via SSM
         run: |
-          for INSTANCE_ID in $(cat Instance_windows.txt); do
-            echo "📤 Deploying scripts to $INSTANCE_ID"
+          for INSTANCE_ID in \$(<Instance_windows.txt); do
+            echo "📤 Deploying to \$INSTANCE_ID"
             aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
+              --instance-ids   "\$INSTANCE_ID" \
               --document-name  AWS-RunPowerShellScript \
-              --parameters     file://tmp-ssm/params-${INSTANCE_ID}.json \
-              --comment        "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
-              --region         $AWS_DEFAULT_REGION \
+              --comment        "Copy install + scan file into Execution folder" \
+              --parameters     file://tmp-ssm/params-\$INSTANCE_ID.json \
               --output         text
           done
-          rm -rf tmp-ssm
+
+      - name: 🧹 Clean up
+        run: rm -rf tmp-ssm
