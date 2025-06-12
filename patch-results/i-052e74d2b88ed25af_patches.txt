@@ -6,6 +6,8 @@
 Mode                LastWriteTime         Length Name                                                                  
 ----                -------------         ------ ----                                                                  
 d-----        6/12/2025   5:34 AM                Patch                                                                 
+=== Windows Security Scan for i-052e74d2b88ed25af at 06/12/2025 05:41:31 ===
+[INFO] PSWindowsUpdate not found; installing...
 
 
 
