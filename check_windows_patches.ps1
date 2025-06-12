@@ -1,58 +1,76 @@
 <#
 .SYNOPSIS
-  Scans Windows for available Critical and Security updates.
-.PARAMETER InstanceId
-  (Optional) EC2 Instance ID for logging.
-#>
+  Scans Windows updates via PSWindowsUpdate (auto-installs exactly v2.1.1.2 if needed, skipping publisher check).
 
+.PARAMETER InstanceId
+  The EC2 Instance ID (passed in from your workflow).
+
+#>
 param(
-  [string]$InstanceId = $(Throw "Please supply -InstanceId")
+    [Parameter(Mandatory=$true)]
+    [string]$InstanceId
 )
 
-# 1) Make sure TLS1.2 is used (required for PowerShell Gallery)
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Drop-folder
+$PatchDir = 'C:\Windows\System32\Patch'
+if (-not (Test-Path $PatchDir)) {
+    New-Item -Path $PatchDir -ItemType Directory -Force | Out-Null
+}
 
-# 2) Trust PSGallery and install NuGet provider if needed
+# Header
+$now = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
+Write-Output "=== Windows Patches Scan for $InstanceId ($now) ==="
+
+# Ensure PSGallery trusted
 if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
     Register-PSRepository -Default
 }
-Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
 
-if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
-    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
-}
+# Desired version
+$required = '2.1.1.2'
+$found = Get-Module -ListAvailable -Name PSWindowsUpdate | Select-Object -First 1
 
-# 3) Auto-install PSWindowsUpdate if missing
-if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-    Write-Output "[INFO] Installing PSWindowsUpdate module..."
-    Install-Module -Name PSWindowsUpdate -Force -Scope AllUsers -ErrorAction Stop
-}
-
-# 4) Import it (or fall back)
-try {
-    Import-Module PSWindowsUpdate -ErrorAction Stop
-    $usePSWU = $true
-} catch {
-    Write-Warning "[WARN] PSWindowsUpdate import failed: $_"
-    $usePSWU = $false
-}
-
-# 5) Header
-$now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-Write-Output "=== Windows Patch Scan for $InstanceId at $now ==="
-
-if ($usePSWU) {
-    # Use PSWindowsUpdate to list only Security & Critical updates
-    Get-WUList -MicrosoftUpdate -Classification SecurityUpdates,CriticalUpdates |
-      Select-Object KB, Title, Size, @{n='Severity';e={$_.MsrcSeverity}}
-} else {
-    # Fall back to COM-based search for Security category
-    $session  = New-Object -ComObject Microsoft.Update.Session
-    $searcher = $session.CreateUpdateSearcher()
-    $secCat   = '0fa1201d-4330-4fa8-8ae9-b877473b6441'  # Security Updates GUID
-    $query    = "IsInstalled=0 and IsHidden=0 and CategoryIDs contains '$secCat'"
-    $result   = $searcher.Search($query)
-    foreach ($u in $result.Updates) {
-        "{0}  {1}" -f $u.KBArticleIDs[0], $u.Title
+if (-not $found -or $found.Version.ToString() -ne $required) {
+    Write-Output "[INFO] Installing PSWindowsUpdate v$required (skipping publisher check)..."
+    # Remove any other version
+    if ($found) {
+        try {
+            Uninstall-Module -Name PSWindowsUpdate -AllVersions -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "[WARN] Could not uninstall existing PSWindowsUpdate: $_"
+        }
     }
+
+    Install-Module `
+      -Name PSWindowsUpdate `
+      -RequiredVersion $required `
+      -Scope AllUsers `
+      -Force `
+      -SkipPublisherCheck `
+      -ErrorAction Stop
 }
+
+Import-Module PSWindowsUpdate -ErrorAction Stop
+
+# Scan
+Write-Output "[INFO] Scanning for available updates..."
+try {
+    $updates = Get-WUList -MicrosoftUpdate -ErrorAction Stop
+} catch {
+    Write-Error "❌ Scan failed: $_"
+    exit 1
+}
+
+# Filter Critical/Important security fixes
+$secfixes = $updates |
+    Where-Object { $_.Title -match 'Security Update' -and ($_.Title -match 'Critical' -or $_.Title -match 'Important') } |
+    Select-Object @{Name='KB';Expression={$_.KB}}, @{Name='Title';Expression={$_.Title}}
+
+if ($secfixes.Count -gt 0) {
+    $secfixes | ForEach-Object { "{0} - {1}" -f $_.KB, $_.Title }
+} else {
+    Write-Output "No important or critical security updates available."
+}
+
+exit 0
