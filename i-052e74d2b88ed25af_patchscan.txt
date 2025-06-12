@@ -1,1 +1,19 @@
-None
+
+
+    Directory: C:\Windows\System32
+
+
+Mode                LastWriteTime         Length Name                                                                  
+----                -------------         ------ ----                                                                  
+d-----        6/12/2025   5:34 AM                Patch                                                                 
+
+Name                           Version          Source           Summary                                               
+----                           -------          ------           -------                                               
+nuget                          2.8.5.208        https://cdn.o... NuGet provider for the OneGet meta-package manager    
+[INFO] Installing PSWindowsUpdate module...
+=== Windows Patch Scan for i-052e74d2b88ed25af at 2025-06-12 05:56:29 ===
+
+
+
+
+
