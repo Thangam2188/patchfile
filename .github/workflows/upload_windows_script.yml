@@ -1,14 +1,16 @@
-name: Upload Windows Patch Scripts to EC2
+name: Deploy Windows Patch Script & Scan to EC2
 
 on:
   workflow_dispatch:
 
 jobs:
-  upload_windows_scripts:
+  deploy_windows_artifacts:
     runs-on: ubuntu-latest
+    env:
+      AWS_DEFAULT_REGION: us-east-1
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repo (includes install_windows_patches.ps1 and *_patchscan.txt)
         uses: actions/checkout@v2
 
       - name: Install AWS CLI & tools
@@ -16,8 +18,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -o awscliv2.zip
-          sudo ./aws/install --update
+          unzip -o awscliv2.zip && sudo ./aws/install --update
           aws --version
 
       - name: Get temporary AWS creds via MFA
@@ -29,14 +30,14 @@ jobs:
           MFA_SERIAL_ARN:        arn:aws:iam::472598590798:mfa/TESTGIT1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
-          CREDS=$(aws sts get-session-token \
+          JSON=$(aws sts get-session-token \
             --serial-number "$MFA_SERIAL_ARN" \
             --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId <<<"$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey <<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken <<<"$CREDS")"     >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$JSON")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$JSON")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$JSON")"     >> $GITHUB_ENV
 
       - name: Configure AWS CLI profile
         run: |
@@ -46,33 +47,41 @@ jobs:
           aws configure set region                us-east-1                --profile temp
           echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
-      - name: Build SSM parameter file
+      - name: Deploy installer & scan-report to Windows EC2 via SSM
         run: |
-          BASE_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
+          # Prepare a temp dir for JSON parameter files
           mkdir -p tmp-ssm
-          cat > tmp-ssm/ssm-params.json <<EOF
+          # Base raw URL to your repo's main branch
+          BASE_RAW="https://raw.githubusercontent.com/${{ github.repository }}/main"
+
+          # For each Windows instance listed in Instance_windows.txt
+          while IFS= read -r INSTANCE_ID || [ -n "$INSTANCE_ID" ]; do
+            echo "📤 Deploying to $INSTANCE_ID"
+
+            # Generate a per-instance JSON describing the 5 commands
+            cat > tmp-ssm/params-${INSTANCE_ID}.json <<EOF
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri '$BASE_URL/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
-    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'"
+    "Invoke-WebRequest -Uri '${BASE_RAW}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
+    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
+    "Invoke-WebRequest -Uri '${BASE_RAW}/${INSTANCE_ID}_patchscan.txt' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'",
+    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'"
   ]
 }
 EOF
 
-      - name: Deploy install_windows_patches.ps1 via SSM
-        run: |
-          while IFS= read -r INSTANCE_ID || [ -n "$INSTANCE_ID" ]; do
-            echo "📤 Deploying to $INSTANCE_ID"
+            # Send the SSM command
             aws ssm send-command \
-              --instance-ids       "$INSTANCE_ID" \
-              --document-name      AWS-RunPowerShellScript \
-              --comment            "Deploy install_windows_patches.ps1" \
-              --parameters         file://tmp-ssm/ssm-params.json \
-              --region             us-east-1 \
-              --output             text
+              --instance-ids      "$INSTANCE_ID" \
+              --document-name     AWS-RunPowerShellScript \
+              --comment           "Deploy patch script & scan result" \
+              --parameters        file://tmp-ssm/params-${INSTANCE_ID}.json \
+              --output            text
           done < Instance_windows.txt
 
-      - name: Clean up
-        run: |
+          # Clean up
           rm -rf tmp-ssm
+
+      - name: Success
+        run: echo "✅ install_windows_patches.ps1 and each instance’s _patchscan.txt have been copied to your Windows servers."
