@@ -6,6 +6,7 @@ on:
 jobs:
   upload_windows_scripts:
     runs-on: ubuntu-latest
+
     env:
       AWS_DEFAULT_REGION: us-east-1
 
@@ -30,6 +31,7 @@ jobs:
             --token-code $MFA_CODE \
             --duration-seconds 3600 \
             --output json)
+
           echo "AWS_ACCESS_KEY_ID=$(echo \"$CREDS\" | jq -r .Credentials.AccessKeyId)"   >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=$(echo \"$CREDS\" | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo \"$CREDS\" | jq -r .Credentials.SessionToken)"     >> $GITHUB_ENV
@@ -40,6 +42,11 @@ jobs:
           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
           aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
           aws configure set region                $AWS_DEFAULT_REGION    --profile temp
+
+      - name: Export AWS_PROFILE
+        # so that subsequent aws calls use our "temp" profile
+        run: |
+          echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
       - name: Build SSM parameters JSON
         run: |
@@ -55,20 +62,16 @@ jobs:
           EOF
 
       - name: Deploy PowerShell scripts via SSM
-        env:
-          AWS_PROFILE: temp
         run: |
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Deploying scripts to $INSTANCE_ID"
             aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "AWS-RunPowerShellScript" \
-              --comment "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
-              --parameters file://params.json \
-              --region $AWS_DEFAULT_REGION \
-              --output text
+              --instance-ids   "$INSTANCE_ID" \
+              --document-name  "AWS-RunPowerShellScript" \
+              --comment        "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
+              --parameters     file://params.json \
+              --output         text
           done < Instance_windows.txt
 
       - name: Clean up
-        run: |
-          rm -f params.json
+        run: rm -f params.json
