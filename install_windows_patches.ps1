@@ -1,65 +1,38 @@
-<#
-.SYNOPSIS
-  Installs Windows updates from the scan report.
-
-.DESCRIPTION
-  Reads the list of KB IDs from available_updates.txt, installs them,
-  and logs output and errors to a log file.
-
-.NOTES
-  Requires administrative privileges and PSWindowsUpdate module.
-#>
-
-param (
-    [string]$ScriptDir = "C:\Scripts"
+param(
+  [string]$InstanceId
 )
 
-$PatchList   = Join-Path $ScriptDir "available_updates.txt"
-$LogFile     = Join-Path $ScriptDir "install_log.txt"
+$PatchDir   = "C:\Windows\System32\Patch"
+$PatchFile  = Join-Path $PatchDir "$InstanceId`_patchscan.txt"
+$LogFile    = Join-Path $PatchDir "patch_install_log.txt"
 
-function Log($msg) {
-    $ts = Get-Date -Format "[yyyy-MM-dd HH:mm:ss]"
-    "$ts $msg" | Out-File $LogFile -Append
+function Log {
+  param([string]$msg)
+  $time = Get-Date -Format "[yyyy-MM-dd HH:mm:ss]"
+  "$time $msg" | Out-File -FilePath $LogFile -Append -Encoding UTF8
 }
 
-# Ensure script directory exists
-if (-not (Test-Path $ScriptDir)) {
-    New-Item -Path $ScriptDir -ItemType Directory | Out-Null
+Log "=== Starting patch install for $InstanceId ==="
+
+if (-not (Test-Path $PatchFile)) {
+  Log "No patch file found at $PatchFile; skipping install."
+  exit 0
 }
 
-Log "=== Starting patch installation ==="
-
-if (-not (Test-Path $PatchList)) {
-    Log "WARN: Patch list not found at $PatchList"
-    exit 0
-}
-
-# Read KB IDs
-$kbIDs = Get-Content $PatchList | ForEach-Object {
-    if ($_ -match "^KB\d+") { $matches[0] }
-}
-
-if (-not $kbIDs) {
-    Log "INFO: No patches to install."
-    exit 0
-}
-
-# Ensure PSWindowsUpdate module
+# Example: install all missing Windows updates
+# Requires PSWindowsUpdate module
 if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-    Install-Module -Name PSWindowsUpdate -Force -Confirm:$false
+  Log "PSWindowsUpdate module missing; cannot auto-install."
+  exit 1
 }
+
 Import-Module PSWindowsUpdate
-
-# Install updates
-foreach ($kb in $kbIDs) {
-    Log "Installing $kb..."
-    try {
-        Install-WindowsUpdate -KBArticleID $kb -AcceptAll -IgnoreReboot -ErrorAction Stop -Verbose |
-          Out-File $LogFile -Append
-        Log "SUCCESS: Installed $kb"
-    } catch {
-        Log "ERROR: Failed to install $kb - $($_.Exception.Message)"
-    }
+try {
+  Log "Installing updates..."
+  $results = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -AutoReboot
+  Log ($results | Out-String)
+  Log "=== Installation completed successfully ==="
+} catch {
+  Log "ERROR during installation: $_"
+  exit 1
 }
-
-Log "=== Patch installation completed ==="
