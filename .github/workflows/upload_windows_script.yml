@@ -35,9 +35,9 @@ jobs:
             --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId <<< "$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey <<< "$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken <<< "$CREDS")"     >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId <<< \"$CREDS\")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey <<< \"$CREDS\")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken <<< \"$CREDS\")"     >> $GITHUB_ENV
 
       - name: Configure AWS CLI profile
         run: |
@@ -47,18 +47,17 @@ jobs:
           aws configure set region                "us-east-1"              --profile temp
           echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
-      - name: Deploy installer & scan results via SSM
+      - name: Deploy installer & scan files via SSM
         env:
           AWS_PROFILE: temp
         run: |
           mkdir -p tmp-ssm
-          BASE_RAW="https://raw.githubusercontent.com/${{ github.repository }}/main"
+          BASE_RAW="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main"
 
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Deploying to $INSTANCE_ID"
+            echo "📤 Deploying to $INSTANCE_ID..."
 
-            # build per-instance JSON
-            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
+            cat <<EOF > tmp-ssm/ssm-params-${INSTANCE_ID}.json
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
@@ -73,12 +72,10 @@ EOF
             aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --comment "Deploy Windows patch installer & scan" \
-              --parameters file://tmp-ssm/params-${INSTANCE_ID}.json \
+              --comment "Deploy Windows patch installer & scan results" \
+              --parameters file://tmp-ssm/ssm-params-${INSTANCE_ID}.json \
               --output text
           done < Instance_windows.txt
 
-          rm -rf tmp-ssm
-
-      - name: Done
-        run: echo "✅ Scripts & scan files deployed to all Windows instances."
+      - name: Cleanup
+        run: rm -rf tmp-ssm
