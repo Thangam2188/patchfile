@@ -1,31 +1,32 @@
-name: Fetch Windows Patch Scan Results
+name: Upload Windows Patch Scripts to EC2
 
 on:
   workflow_dispatch:
 
 jobs:
-  fetch_windows_patchscan:
+  upload_windows_scripts:
     runs-on: ubuntu-latest
-    env:
-      AWS_DEFAULT_REGION: us-east-1
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v2
 
-      - name: 🛠 Install AWS CLI & dependencies
+      - name: Install AWS CLI & tools
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -o awscliv2.zip && sudo ./aws/install --update
-      - name: 🔑 Get temporary AWS creds via MFA
+          unzip -o awscliv2.zip
+          sudo ./aws/install --update
+          aws --version
+
+      - name: Get temporary AWS creds via MFA
         id: mfa
         env:
-          MFA_SECRET: ${{ secrets.MFA_SECRET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          MFA_SECRET:            ${{ secrets.MFA_SECRET }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+          MFA_SERIAL_ARN:        arn:aws:iam::472598590798:mfa/TESTGIT1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           CREDS=$(aws sts get-session-token \
@@ -33,59 +34,46 @@ jobs:
             --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"  >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"     >> $GITHUB_ENV
-      - name: ⚙️ Configure AWS CLI profile
+          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId <<<"$CREDS")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey <<<"$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken <<<"$CREDS")"     >> $GITHUB_ENV
+
+      - name: Configure AWS CLI profile
         run: |
           aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"     --profile temp
           aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile temp
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
           aws configure set region                us-east-1                --profile temp
+          echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
-      - name: Fetch each instance’s patch scan file via SSM
+      - name: Deploy PowerShell scripts via SSM
+        env:
+          AWS_PROFILE: temp
         run: |
+          BASE_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
           mkdir -p tmp-ssm
-          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📥 Fetching patchscan for $INSTANCE_ID"
 
-            # 1) build a per-instance JSON for --parameters
-            cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
+          # Build the JSON payload once
+          cat <<'EOF' > tmp-ssm/ssm-params.json
 {
   "commands": [
-    "Get-Content -Path \\"C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt\\""
+    "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
+    "Invoke-WebRequest -Uri '${BASE_URL}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
+    "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'"
   ]
 }
 EOF
 
-            # 2) dispatch the SSM command
-            CMD_ID=$(aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name "AWS-RunPowerShellScript" \
-              --comment "Fetch patch scan txt for $INSTANCE_ID" \
-              --parameters file://tmp-ssm/params-${INSTANCE_ID}.json \
-              --query Command.CommandId --output text)
-
-            # 3) wait until it finishes
-            aws ssm wait command-executed \
-              --instance-id "$INSTANCE_ID" \
-              --command-id "$CMD_ID"
-
-            # 4) capture its stdout into a local file
-            aws ssm get-command-invocation \
-              --instance-id "$INSTANCE_ID" \
-              --command-id "$CMD_ID" \
-              --query StandardOutputContent --output text \
-              > "${INSTANCE_ID}_patchscan.txt"
-
+          # Push to each Windows instance
+          while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
+            echo "📤 Deploying install_windows_patches.ps1 to $INSTANCE_ID"
+            aws ssm send-command \
+              --instance-ids   "$INSTANCE_ID" \
+              --document-name  "AWS-RunPowerShellScript" \
+              --comment        "Drop install_windows_patches.ps1 to C:\\Windows\\System32\\Patch\\Execution" \
+              --parameters     file://tmp-ssm/ssm-params.json \
+              --region         us-east-1 \
+              --output         text
           done < Instance_windows.txt
 
-      - name: Commit scan reports back to GitHub
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add *_patchscan.txt
-          git commit -m "🖥️ Windows patch scan results" || echo "No changes to commit"
-          git push
+          rm -rf tmp-ssm
