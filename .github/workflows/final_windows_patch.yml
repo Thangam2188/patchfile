@@ -112,7 +112,7 @@ jobs:
                     --output text)
             echo "$LOG" > "${INSTANCE_ID}_patch_log.txt"
             echo "✔ Log saved for $INSTANCE_ID"
-          done < instance_windows.txt
+          done < Instance_windows.txt
 
     # ──────────────────────────── 6. COMMIT RESULTS TO GIT ────────────────────────
       - name: Commit backup & logs
