@@ -34,9 +34,9 @@ jobs:
             --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' <<<"$CREDS")"   >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' <<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' <<<"$CREDS")"     >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"   >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"     >> $GITHUB_ENV
 
       - name: Configure AWS CLI
         run: |
@@ -52,6 +52,7 @@ jobs:
           BASE_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
           mkdir -p tmp-ssm
 
+          # build a single JSON params file to avoid YAML quoting issues
           cat <<EOF > tmp-ssm/ssm-params.json
 {
   "commands": [
@@ -63,6 +64,7 @@ jobs:
 }
 EOF
 
+          # loop over each Windows instance
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Deploying scripts to $INSTANCE_ID"
             aws ssm send-command \
