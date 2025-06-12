@@ -52,13 +52,13 @@ jobs:
           BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main"
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
-{"commands":[
-  "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
-  "Invoke-WebRequest -Uri '${BASE_URL}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
-  "Invoke-WebRequest -Uri '${BASE_URL}/${INSTANCE_ID}_patchscan.txt' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'",
-  "Unblock-File -Path 'C:\\Windows\\System32\\Patch\\Execution\\*.ps1'"
-]}
-EOF
+          {"commands":[
+            "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
+            "Invoke-WebRequest -Uri '${BASE_URL}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
+            "Invoke-WebRequest -Uri '${BASE_URL}/${INSTANCE_ID}_patchscan.txt' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'",
+            "Unblock-File -Path 'C:\\Windows\\System32\\Patch\\Execution\\*.ps1'"
+          ]}
+          EOF
           done < Instance_windows.txt
 
       - name: 🚀 Deploy scripts via SSM
