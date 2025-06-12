@@ -1,12 +1,11 @@
-name: Upload Windows Patch Scripts to EC2
+name: Fetch Windows Patch Scan Results
 
 on:
   workflow_dispatch:
 
 jobs:
-  upload_windows_scripts:
+  fetch_windows_patchscan:
     runs-on: ubuntu-latest
-
     env:
       AWS_DEFAULT_REGION: us-east-1
 
@@ -44,30 +43,39 @@ jobs:
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
           aws configure set region                us-east-1                --profile temp
 
-      - name: Build SSM parameters JSON
-        run: |
-          cat << 'EOF' > params.json
-          {
-            "commands": [
-              "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
-              "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\check_windows_patches.ps1'",
-              "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Thangam2188/patchfile/main/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
-              "Unblock-File 'C:\\Windows\\System32\\Patch\\Execution\\*.ps1'"
-            ]
-          }
-          EOF
-
-      - name: Deploy PowerShell scripts via SSM
+      - name: Fetch each instance’s patch scan file
         run: |
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Deploying scripts to $INSTANCE_ID"
-            aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
-              --document-name  "AWS-RunPowerShellScript" \
-              --comment        "Drop patch scripts to C:\\Windows\\System32\\Patch\\Execution" \
-              --parameters     file://params.json \
-              --output         text
+            echo "📥 Fetching patchscan for $INSTANCE_ID"
+
+            # 1) trigger SSM-run to cat the remote file
+            CMD_ID=$(aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunPowerShellScript" \
+              --comment "Fetch patch scan txt" \
+              --parameters \
+                commands=["Get-Content -Path 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'"] \
+              --query 'Command.CommandId' --output text)
+
+            # 2) wait for it to finish
+            aws ssm wait command-executed \
+              --instance-id "$INSTANCE_ID" \
+              --command-id "$CMD_ID"
+
+            # 3) grab its stdout and write to a local file
+            aws ssm get-command-invocation \
+              --instance-id "$INSTANCE_ID" \
+              --command-id "$CMD_ID" \
+              --query 'StandardOutputContent' --output text \
+              > "${INSTANCE_ID}_patchscan.txt"
           done < Instance_windows.txt
 
-      - name: Clean up
-        run: rm -f params.json
+      - name: Commit scan reports back to GitHub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add *_patchscan.txt
+          git commit -m "🖥️ Windows patch scan results" || echo "No changes to commit"
+          git push
