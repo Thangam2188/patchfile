@@ -52,7 +52,7 @@ jobs:
           BASE_URL="https://raw.githubusercontent.com/Thangam2188/patchfile/main"
           mkdir -p tmp-ssm
 
-          # build JSON payload
+          # Build the JSON parameters for SSM
           cat <<EOF > tmp-ssm/ssm-params.json
 {
   "commands": [
@@ -64,7 +64,7 @@ jobs:
 }
 EOF
 
-          # for each instance, push those four commands
+          # Send that payload to each Windows instance
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             echo "📤 Deploying scripts to $INSTANCE_ID"
             aws ssm send-command \
