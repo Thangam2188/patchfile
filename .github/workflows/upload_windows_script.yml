@@ -10,17 +10,17 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
 
     steps:
-      - name: 📥 Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: 🛠 Install AWS CLI & dependencies
+      - name: Install AWS CLI & dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -o awscliv2.zip && sudo ./aws/install --update
 
-      - name: 🔑 Get temporary AWS creds via MFA
+      - name: Get temporary AWS creds via MFA
         id: mfa
         env:
           MFA_SECRET:            ${{ secrets.MFA_SECRET }}
@@ -31,50 +31,48 @@ jobs:
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
           CREDS=$(aws sts get-session-token \
             --serial-number "$MFA_SERIAL_ARN" \
-            --token-code    "$MFA_CODE" \
+            --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .Credentials.AccessKeyId)"   >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .Credentials.AccessKeyId)" >> $GITHUB_ENV
           echo "AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .Credentials.SessionToken)"      >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .Credentials.SessionToken)" >> $GITHUB_ENV
 
-      - name: ⚙️ Configure AWS CLI profile “temp”
+      - name: Configure AWS CLI profile “temp”
         run: |
           aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"     --profile temp
           aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile temp
           aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
           aws configure set region                us-east-1                --profile temp
 
-      - name: 📝 Build per-instance SSM JSON
+      - name: Build per-instance SSM JSON
         run: |
           mkdir -p tmp-ssm
           BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main"
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
             cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
-{
-  "commands": [
-    "New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution' -ItemType Directory -Force",
-    "Invoke-WebRequest -Uri \"${BASE_URL}/install_windows_patches.ps1\" -OutFile \"C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\install_windows_patches.ps1\"",
-    "Invoke-WebRequest -Uri \"${BASE_URL}/${INSTANCE_ID}_patchscan.txt\" -OutFile \"C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\${INSTANCE_ID}_patchscan.txt\"",
-    "Unblock-File -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\*.ps1'"
-  ]
-}
+{"commands":[
+  "New-Item -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution' -ItemType Directory -Force",
+  "Invoke-WebRequest -Uri \"${BASE_URL}/install_windows_patches.ps1\" -OutFile \"C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\install_windows_patches.ps1\"",
+  "Invoke-WebRequest -Uri \"${BASE_URL}/${INSTANCE_ID}_patchscan.txt\" -OutFile \"C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\${INSTANCE_ID}_patchscan.txt\"",
+  "Unblock-File -Path 'C:\\\\Windows\\\\System32\\\\Patch\\\\Execution\\\\*.ps1'"
+]}
 EOF
           done < Instance_windows.txt
 
-      - name: 🚀 Deploy scripts via SSM
+      - name: Deploy scripts via SSM
         env:
           AWS_PROFILE: temp
         run: |
           for INSTANCE_ID in $(<Instance_windows.txt); do
-            echo "📤 Deploying to $INSTANCE_ID"
+            echo "Deploying to $INSTANCE_ID"
             aws ssm send-command \
-              --instance-ids   "$INSTANCE_ID" \
-              --document-name  AWS-RunPowerShellScript \
-              --comment        "Drop installer & scan file" \
-              --parameters     file://tmp-ssm/params-${INSTANCE_ID}.json \
-              --output         text
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunPowerShellScript" \
+              --comment "Drop installer & scan file" \
+              --parameters file://tmp-ssm/params-${INSTANCE_ID}.json \
+              --output text
           done
 
-      - name: 🧹 Clean up
+      - name: Clean up
         run: rm -rf tmp-ssm
