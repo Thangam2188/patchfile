@@ -1,89 +1,102 @@
+# .github/workflows/patch_windows.yml
 name: Run Windows Patch Scan and Commit Output
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: '0 0 * * 1'  # Every Monday at midnight UTC
 
 jobs:
   scan_windows_patches:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
       - name: Install AWS CLI & Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -o awscliv2.zip && sudo ./aws/install --update
+          unzip -o awscliv2.zip
+          sudo ./aws/install --update
 
       - name: Get temporary AWS creds via MFA
-        id: mfa
+        id: mfa_creds
         env:
           MFA_SECRET: ${{ secrets.MFA_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           MFA_SERIAL_ARN: arn:aws:iam::472598590798:mfa/TESTGIT1
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           MFA_CODE=$(oathtool --base32 --totp "$MFA_SECRET")
-          CREDS=$(aws sts get-session-token \
-            --serial-number $MFA_SERIAL_ARN \
-            --token-code $MFA_CODE \
+          TEMP_CREDS=$(aws sts get-session-token \
+            --serial-number "$MFA_SERIAL_ARN" \
+            --token-code "$MFA_CODE" \
             --duration-seconds 3600 \
             --output json)
-          echo "AWS_ACCESS_KEY_ID=$(jq -r .Credentials.AccessKeyId<<<"$CREDS")"  >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(jq -r .Credentials.SecretAccessKey<<<"$CREDS")" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(jq -r .Credentials.SessionToken<<<"$CREDS")"     >> $GITHUB_ENV
+          echo "AWS_ACCESS_KEY_ID=$(echo "$TEMP_CREDS" | jq -r .Credentials.AccessKeyId)"  >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo "$TEMP_CREDS" | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo "$TEMP_CREDS" | jq -r .Credentials.SessionToken)" >> $GITHUB_ENV
 
-      - name: Configure AWS CLI
+      - name: Configure AWS CLI Profile
         run: |
-          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID     --profile temp
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
-          aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
-          aws configure set region                us-east-1              --profile temp
+          aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"     --profile temp
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile temp
+          aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
+          aws configure set region                us-east-1                --profile temp
 
       - name: Deploy & run patch scan on Windows via SSM
         env:
           AWS_PROFILE: temp
         run: |
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "🔍 Scanning $INSTANCE_ID"
+            echo "🔍 Scanning updates on $INSTANCE_ID"
 
-            # create target folder & fetch script
-            aws ssm send-command \
+            CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
               --comment "Deploy and run patch scanner" \
-              --parameters commands="\[
-                'New-Item -Path \"C:\Windows\System32\Patch\" -ItemType Directory -Force',
-                'Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/${{ github.repository }}/main/check_windows_patches.ps1\" -OutFile \"C:\Windows\System32\Patch\check_windows_patches.ps1\"',
-                'powershell.exe -ExecutionPolicy Bypass -File \"C:\Windows\System32\Patch\check_windows_patches.ps1\" -InstanceId $INSTANCE_ID'
-              \]" \
-              --query 'Command.CommandId' --output text \
-              > cmd.txt
+              --parameters '{"commands":[
+                "New-Item -Path \"C:\\Windows\\System32\\Patch\" -ItemType Directory -Force",
+                "Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/Thangam2188/patchfile/main/check_windows_patches.ps1\" -OutFile \"C:\\Windows\\System32\\Patch\\check_windows_patches.ps1\"",
+                "powershell.exe -ExecutionPolicy Bypass -File \"C:\\Windows\\System32\\Patch\\check_windows_patches.ps1\" -InstanceId '"$INSTANCE_ID"'"
+              ]}' \
+              --query "Command.CommandId" \
+              --output text)
 
-            CMD_ID=$(<cmd.txt)
             echo "➡️ Command ID: $CMD_ID"
 
-            # wait for up to 10 minutes
+            # wait up to ~10 minutes
             for i in {1..20}; do
               STATUS=$(aws ssm get-command-invocation \
                 --command-id "$CMD_ID" \
                 --instance-id "$INSTANCE_ID" \
                 --query "Status" --output text)
               echo "   • Status: $STATUS"
-              if [[ "$STATUS" == "Success" ]]; then break; fi
-              if [[ "$STATUS" =~ ^(Failed|Cancelled|TimedOut)$ ]]; then
-                echo "❌ scan failed"; exit 1; fi
-              sleep 30
+              if [[ "$STATUS" == "Success" ]]; then
+                break
+              elif [[ "$STATUS" =~ ^(Failed|Cancelled|TimedOut)$ ]]; then
+                echo "❌ Scan failed on $INSTANCE_ID"
+                aws ssm get-command-invocation \
+                  --command-id "$CMD_ID" \
+                  --instance-id "$INSTANCE_ID" \
+                  --query "StandardErrorContent" \
+                  --output text
+                exit 1
+              else
+                sleep 30
+              fi
             done
 
-            # pull down the results
+            # grab the script’s stdout
             aws ssm get-command-invocation \
               --command-id "$CMD_ID" \
               --instance-id "$INSTANCE_ID" \
-              --query "StandardOutputContent" --output text \
+              --query "StandardOutputContent" \
+              --output text \
               > "${INSTANCE_ID}_patchscan.txt"
 
           done < Instance_windows.txt
@@ -95,5 +108,5 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add *_patchscan.txt
-          git commit -m "Windows patch scan results" || echo "No changes"
+          git commit -m "Windows patch scan results" || echo "No changes to commit"
           git push
