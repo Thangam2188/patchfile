@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Scans Windows updates via PSWindowsUpdate.
+  Scans only Critical & Security Windows updates via PSWindowsUpdate 
+  (auto-installs module if needed).
 
 .PARAMETER InstanceId
   The EC2 Instance ID (passed in from your workflow).
@@ -11,47 +12,54 @@ param(
   [string]$InstanceId
 )
 
-# Where we’ll drop our log
+#  ——————————————————————————————————————————————————————————————
+#  Setup
+#  ——————————————————————————————————————————————————————————————
 $PatchDir = 'C:\Windows\System32\Patch'
-if (!(Test-Path $PatchDir)) {
-  New-Item -Path $PatchDir -ItemType Directory -Force | Out-Null
+if (-not (Test-Path $PatchDir)) {
+    New-Item -Path $PatchDir -ItemType Directory -Force | Out-Null
 }
 
-# Timestamp header
 $now = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
-Write-Output "=== Windows Patches Scan for $InstanceId ($now) ==="
+Write-Output "=== Windows Security Scan for $InstanceId at $now ==="
 
-# 1) Ensure PSWindowsUpdate is available
+#  ——————————————————————————————————————————————————————————————
+#  Ensure PSWindowsUpdate is available
+#  ——————————————————————————————————————————————————————————————
 if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-  Write-Output "[INFO] PSWindowsUpdate module not found; installing from PSGallery..."
-  # Trust the gallery if necessary
-  if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-    Register-PSRepository -Default
-  }
-  Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
-
-  Install-Module -Name PSWindowsUpdate -Force -Scope AllUsers -ErrorAction Stop
+    Write-Output "[INFO] PSWindowsUpdate not found; installing..."
+    if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+        Register-PSRepository -Default
+    }
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+    Install-Module -Name PSWindowsUpdate -Force -Scope AllUsers -ErrorAction Stop
 }
-
 Import-Module PSWindowsUpdate -ErrorAction Stop
 
-# 2) Perform a scan
-Write-Output "[INFO] Scanning for available updates..."
+#  ——————————————————————————————————————————————————————————————
+#  Perform the scan, filtering to Critical + Security updates only
+#  ——————————————————————————————————————————————————————————————
+Write-Output "[INFO] Scanning for Critical & Security updates..."
 try {
-  $updates = Get-WUList -MicrosoftUpdate -ErrorAction Stop
+    $updates = Get-WUList `
+        -MicrosoftUpdate `
+        -Classification CriticalUpdates,SecurityUpdates `
+        -ErrorAction Stop
 } catch {
-  Write-Error "Failed to scan updates: $_"
-  exit 1
+    Write-Error "❌ Scan failed: $_"
+    exit 1
 }
 
-# 3) Output results
+#  ——————————————————————————————————————————————————————————————
+#  Emit results
+#  ——————————————————————————————————————————————————————————————
 if ($updates.Count -gt 0) {
-  $updates | ForEach-Object {
-    # e.g. KB description and title
-    Write-Output ("{0} - {1}" -f $_.KB, $_.Title)
-  }
+    $updates | ForEach-Object {
+        # Each update object has KB and Title
+        "{0}  {1}" -f $_.KB, $_.Title
+    }
 } else {
-  Write-Output "No updates available."
+    Write-Output "No Critical or Security updates available."
 }
 
 exit 0
