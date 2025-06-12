@@ -13,15 +13,14 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v2
 
-      - name: Install AWS CLI & tools
+      - name: 🛠 Install AWS CLI & dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y oathtool jq curl unzip
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -o awscliv2.zip && sudo ./aws/install --update
-          aws --version
 
-      - name: Get temporary AWS creds via MFA
+      - name: 🔑 Get temporary AWS creds via MFA
         id: mfa
         env:
           MFA_SECRET:            ${{ secrets.MFA_SECRET }}
@@ -39,15 +38,15 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
           echo "AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')"     >> $GITHUB_ENV
 
-      - name: Configure AWS CLI profile
+      - name: ⚙️ Configure AWS CLI profile
         run: |
-          aws configure set aws_access_key_id     $AWS_ACCESS_KEY_ID     --profile temp
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY --profile temp
-          aws configure set aws_session_token     $AWS_SESSION_TOKEN     --profile temp
-          aws configure set region                us-east-1              --profile temp
+          aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"     --profile temp
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile temp
+          aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile temp
+          aws configure set region                us-east-1                --profile temp
           echo "AWS_PROFILE=temp" >> $GITHUB_ENV
 
-      - name: Deploy installer & scan files to Windows EC2 via SSM
+      - name: 📤 Deploy installer & scan file to Windows EC2 via SSM
         env:
           AWS_PROFILE: temp
         run: |
@@ -55,28 +54,28 @@ jobs:
           mkdir -p tmp-ssm
 
           while IFS= read -r INSTANCE_ID || [[ -n "$INSTANCE_ID" ]]; do
-            echo "📤 Deploying to $INSTANCE_ID"
+            echo "Deploying to $INSTANCE_ID…"
 
-            # Build valid JSON payload
+            # Build a valid JSON payload for this instance
             cat <<EOF > tmp-ssm/params-${INSTANCE_ID}.json
 {
   "commands": [
     "New-Item -Path 'C:\\Windows\\System32\\Patch\\Execution' -ItemType Directory -Force",
     "Invoke-WebRequest -Uri '${BASE_URL}/install_windows_patches.ps1' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
-    "Unblock-File -Path 'C:\\Windows\\System32\\Patch\\Execution\\install_windows_patches.ps1'",
     "Invoke-WebRequest -Uri '${BASE_URL}/${INSTANCE_ID}_patchscan.txt' -OutFile 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'",
-    "Unblock-File -Path 'C:\\Windows\\System32\\Patch\\Execution\\${INSTANCE_ID}_patchscan.txt'"
+    "Unblock-File -Path 'C:\\Windows\\System32\\Patch\\Execution\\*.ps1'"
   ]
 }
 EOF
 
-            # Send it via SSM
+            # Send the SSM command
             aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
-              --document-name AWS-RunPowerShellScript \
-              --comment "Deploy Windows patch installer & scan results" \
-              --parameters file://tmp-ssm/params-${INSTANCE_ID}.json
+              --instance-ids   "$INSTANCE_ID" \
+              --document-name  "AWS-RunPowerShellScript" \
+              --comment        "Deploy Windows patch installer & scan file" \
+              --parameters     file://tmp-ssm/params-${INSTANCE_ID}.json \
+              --region         $AWS_DEFAULT_REGION \
+              --output         text
           done < Instance_windows.txt
 
-      - name: Cleanup
-        run: rm -rf tmp-ssm
+          rm -rf tmp-ssm
