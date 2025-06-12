@@ -1,65 +1,58 @@
 <#
 .SYNOPSIS
-  Scans only Critical & Security Windows updates via PSWindowsUpdate 
-  (auto-installs module if needed).
-
+  Scans Windows for available Critical and Security updates.
 .PARAMETER InstanceId
-  The EC2 Instance ID (passed in from your workflow).
-
+  (Optional) EC2 Instance ID for logging.
 #>
+
 param(
-  [Parameter(Mandatory=$true)]
-  [string]$InstanceId
+  [string]$InstanceId = $(Throw "Please supply -InstanceId")
 )
 
-#  ——————————————————————————————————————————————————————————————
-#  Setup
-#  ——————————————————————————————————————————————————————————————
-$PatchDir = 'C:\Windows\System32\Patch'
-if (-not (Test-Path $PatchDir)) {
-    New-Item -Path $PatchDir -ItemType Directory -Force | Out-Null
+# 1) Make sure TLS1.2 is used (required for PowerShell Gallery)
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# 2) Trust PSGallery and install NuGet provider if needed
+if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+    Register-PSRepository -Default
+}
+Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+
+if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
 }
 
-$now = Get-Date -Format "MM/dd/yyyy HH:mm:ss"
-Write-Output "=== Windows Security Scan for $InstanceId at $now ==="
-
-#  ——————————————————————————————————————————————————————————————
-#  Ensure PSWindowsUpdate is available
-#  ——————————————————————————————————————————————————————————————
+# 3) Auto-install PSWindowsUpdate if missing
 if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-    Write-Output "[INFO] PSWindowsUpdate not found; installing..."
-    if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-        Register-PSRepository -Default
-    }
-    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+    Write-Output "[INFO] Installing PSWindowsUpdate module..."
     Install-Module -Name PSWindowsUpdate -Force -Scope AllUsers -ErrorAction Stop
 }
-Import-Module PSWindowsUpdate -ErrorAction Stop
 
-#  ——————————————————————————————————————————————————————————————
-#  Perform the scan, filtering to Critical + Security updates only
-#  ——————————————————————————————————————————————————————————————
-Write-Output "[INFO] Scanning for Critical & Security updates..."
+# 4) Import it (or fall back)
 try {
-    $updates = Get-WUList `
-        -MicrosoftUpdate `
-        -Classification CriticalUpdates,SecurityUpdates `
-        -ErrorAction Stop
+    Import-Module PSWindowsUpdate -ErrorAction Stop
+    $usePSWU = $true
 } catch {
-    Write-Error "❌ Scan failed: $_"
-    exit 1
+    Write-Warning "[WARN] PSWindowsUpdate import failed: $_"
+    $usePSWU = $false
 }
 
-#  ——————————————————————————————————————————————————————————————
-#  Emit results
-#  ——————————————————————————————————————————————————————————————
-if ($updates.Count -gt 0) {
-    $updates | ForEach-Object {
-        # Each update object has KB and Title
-        "{0}  {1}" -f $_.KB, $_.Title
-    }
+# 5) Header
+$now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+Write-Output "=== Windows Patch Scan for $InstanceId at $now ==="
+
+if ($usePSWU) {
+    # Use PSWindowsUpdate to list only Security & Critical updates
+    Get-WUList -MicrosoftUpdate -Classification SecurityUpdates,CriticalUpdates |
+      Select-Object KB, Title, Size, @{n='Severity';e={$_.MsrcSeverity}}
 } else {
-    Write-Output "No Critical or Security updates available."
+    # Fall back to COM-based search for Security category
+    $session  = New-Object -ComObject Microsoft.Update.Session
+    $searcher = $session.CreateUpdateSearcher()
+    $secCat   = '0fa1201d-4330-4fa8-8ae9-b877473b6441'  # Security Updates GUID
+    $query    = "IsInstalled=0 and IsHidden=0 and CategoryIDs contains '$secCat'"
+    $result   = $searcher.Search($query)
+    foreach ($u in $result.Updates) {
+        "{0}  {1}" -f $u.KBArticleIDs[0], $u.Title
+    }
 }
-
-exit 0
