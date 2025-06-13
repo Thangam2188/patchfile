@@ -1,4 +1,4 @@
-name: Snapshot, Install Windows Patches & Commit Logs
+name: Snapshot, Install Windows Patches, Tag & Commit Logs
 
 on:
   schedule:
@@ -66,7 +66,7 @@ jobs:
             exit 1
           fi
 
-      # 6. Snapshot and Install Patches with Log Fetch
+      # 6. Snapshot, Patch, Fetch Logs, Tag
       - name: Snapshot & install patches
         env:
           AWS_PROFILE: temp
@@ -114,11 +114,19 @@ jobs:
             done
 
             if [[ "$PATCH_STATUS" != "Success" ]]; then
-              echo "❌ Patch script failed for $INSTANCE_ID. Skipping log fetch."
+              echo "❌ Patch script failed for $INSTANCE_ID. Skipping log fetch and tag."
               continue
             fi
 
-            # 6-d. Fetch patch_install_log.txt from EC2
+            # 6-d. Tag instance with LastPatched=YYYY-MM-DD
+            PATCH_DATE=$(date +%F)
+            aws ec2 create-tags \
+              --resources "$INSTANCE_ID" \
+              --tags Key=LastPatched,Value="$PATCH_DATE" \
+              --region us-east-1
+            echo "✔ Tagged $INSTANCE_ID with LastPatched=$PATCH_DATE"
+
+            # 6-e. Fetch patch_install_log.txt from EC2
             FETCH_CMD_ID=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
               --document-name "AWS-RunPowerShellScript" \
@@ -155,5 +163,5 @@ jobs:
           git config --global user.name  "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add Windows_backup.txt *_patch_log.txt
-          git commit -m "Windows patch backups & logs" || echo "No changes to commit"
+          git commit -m "Windows patch backups, logs, and tagging" || echo "No changes to commit"
           git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }} HEAD:main
