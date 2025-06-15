@@ -34,4 +34,16 @@ X ComputerName Result     KB          Size Title
 
 
 [2025-06-13 17:23:32] === Installation completed successfully ===
+[2025-06-15 03:52:09] === Starting patch install for i-052e74d2b88ed25af ===
+[2025-06-15 03:52:09] Installing updates...
+[2025-06-15 03:53:07] 
+X ComputerName Result     KB          Size Title                                                                       
+- ------------ ------     --          ---- -----                                                                       
+3 EC2AMAZ-1... Installed  KB2267602    1GB Security Intelligence Update for Microsoft Defender Antivirus - KB2267602...
+3 EC2AMAZ-1... Installed  KB2267602    1GB Security Intelligence Update for Microsoft Defender Antivirus - KB2267602...
+3 EC2AMAZ-1... Installed  KB2267602    1GB Security Intelligence Update for Microsoft Defender Antivirus - KB2267602...
+
+
+
+[2025-06-15 03:53:08] === Installation completed successfully ===
 
