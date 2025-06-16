@@ -1,0 +1,11 @@
+
+
+    Directory: C:\Windows\System32
+
+
+Mode                LastWriteTime         Length Name                                                                  
+----                -------------         ------ ----                                                                  
+d-----        6/12/2025   1:57 PM                Patch                                                                 
+
+
+
