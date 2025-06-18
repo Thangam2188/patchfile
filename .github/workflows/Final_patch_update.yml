@@ -119,6 +119,21 @@ jobs:
               --query 'StandardOutputContent' --output text)
             echo "$OUTPUT" > "${INSTANCE_ID}_patch_log.txt"
           done
+               # Tag instance with LastUpdated
+                TODAY=$(date +%F)
+                aws ec2 create-tags \
+                  --resources "$INSTANCE_ID" \
+                  --tags "Key=LastUpdated,Value=$TODAY" \
+                  --region us-east-1
+                echo "🏷️ Tagged $INSTANCE_ID with LastUpdated=$TODAY"
+                break
+              elif [[ "$STATUS" =~ ^(Failed|Cancelled|TimedOut)$ ]]; then
+                echo "❌ Patching failed for $INSTANCE_ID"
+                break
+              else
+                sleep 15
+              fi
+            done
 
       - name: Commit Backup Info and Logs to Repo
         run: |
